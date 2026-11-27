@@ -49,26 +49,26 @@ jobs:
             # Never replace a newer published snapshot with an older run.
             if [ -f data/tdx-traffic.json ]; then
               if python - "$DATA_DIR/tdx-traffic.json" data/tdx-traffic.json <<'PY'
-import json, sys
-from datetime import datetime
+          import json, sys
+          from datetime import datetime
 
-def stamp(path):
-    with open(path, encoding="utf-8") as f:
-        value = json.load(f).get("generatedAt")
-    if not value:
-        return None
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=__import__("datetime").timezone.utc)
-    return parsed
+          def stamp(path):
+              with open(path, encoding="utf-8") as f:
+                  value = json.load(f).get("generatedAt")
+              if not value:
+                  return None
+              parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+              if parsed.tzinfo is None:
+                  parsed = parsed.replace(tzinfo=__import__("datetime").timezone.utc)
+              return parsed
 
-candidate, published = map(stamp, sys.argv[1:3])
-if candidate is None:
-    raise SystemExit("Candidate snapshot has no generatedAt timestamp")
-if published is not None and published > candidate:
-    print(f"Skip stale snapshot: candidate={candidate.isoformat()} published={published.isoformat()}")
-    raise SystemExit(10)
-PY
+          candidate, published = map(stamp, sys.argv[1:3])
+          if candidate is None:
+              raise SystemExit("Candidate snapshot has no generatedAt timestamp")
+          if published is not None and published > candidate:
+              print(f"Skip stale snapshot: candidate={candidate.isoformat()} published={published.isoformat()}")
+              raise SystemExit(10)
+          PY
               then
                 :
               else
