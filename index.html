@@ -417,8 +417,8 @@
   </div>
 
   <!-- Toast 輕量訊息提示 -->
-  <div id="toast-msg" class="fixed top-16 left-1/2 -translate-x-1/2 z-[1200] pointer-events-none opacity-0 transition-opacity duration-300">
-    <div class="glass-panel rounded-full px-4 py-1.5 text-xs font-medium text-white shadow-xl"></div>
+  <div id="toast-msg" class="fixed top-16 left-1/2 -translate-x-1/2 z-[1200] pointer-events-none opacity-0 transition-opacity duration-300 w-[calc(100vw-32px)] max-w-xl">
+    <div class="glass-panel rounded-2xl px-3 py-2.5 text-[11px] leading-relaxed text-center whitespace-pre-line font-medium text-white shadow-xl"></div>
   </div>
 
   <script>
@@ -923,7 +923,7 @@
           const zeroCount = roadSegments.filter(seg => !seg._speedValid && !seg._stale).length;
           const validCount = roadSegments.filter(seg => !seg._stale && seg._speedValid && seg._congestionLevel !== null).length;
           const pendingLevelCount = roadSegments.filter(seg => !seg._stale && seg._speedValid && seg._congestionLevel === null).length;
-          showToast(`路況 ${roadSegments.length.toLocaleString('zh-TW')} 筆｜有效 ${validCount.toLocaleString('zh-TW')}｜待確認 ${(zeroCount + pendingLevelCount).toLocaleString('zh-TW')}（0 車速 ${zeroCount}／分級 ${pendingLevelCount}）｜過期 ${staleCount}`);
+          showToast(`路況 ${roadSegments.length.toLocaleString('zh-TW')} 筆｜有效 ${validCount.toLocaleString('zh-TW')}｜待確認 ${(zeroCount + pendingLevelCount).toLocaleString('zh-TW')}\n0 車速 ${zeroCount}／分級 ${pendingLevelCount}｜過期 ${staleCount}`);
         }
         if (!roadSegments.length) showToast('目前沒有可顯示的官方路段資料，請稍後重試');
       } catch (error) {
