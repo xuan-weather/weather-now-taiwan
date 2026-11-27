@@ -756,43 +756,105 @@
       });
     }
 
-    function renderCCTV() {
-      layers.cctv.clearLayers();
-      // 全台縮放時避免一次建立數千個 DOM marker；放大到縣市/市區才顯示。
-      if (map.getZoom() < 11) return;
-      cctvData.forEach(cam => {
-        const icon = L.divIcon({
-          className: 'custom-div-icon',
-          html: `
-            <div class="w-7 h-7 rounded-xl bg-sky-600/95 border border-sky-200 shadow-lg flex items-center justify-center text-white hover:scale-110 transition">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            </div>
-          `,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14]
-        });
+    // CCTV 群聚渲染：全台/區域視野以數字群組呈現，放大後改成輕量 Canvas 圓點。
+    // 不建立大量攝影機 DOM 圖示，避免手機拖曳地圖時卡頓。
+    const cctvCanvasRenderer = L.canvas({ padding: 0.25 });
+    const CCTV_CLUSTER_ZOOM = 13;
+    const CCTV_CLUSTER_CELL_PX = 58;
+    let cctvRenderTimer = null;
 
-        const cameraMedia = cam.imageUrl
-          ? `<img src="${cam.imageUrl}" alt="官方監視器影像" loading="lazy" referrerpolicy="no-referrer" class="w-full h-32 object-cover rounded-xl bg-slate-900 border border-white/15 mb-2">`
-          : cam.streamUrl
-            ? `<a href="${cam.streamUrl}" target="_blank" rel="noopener" class="block text-center text-sky-300 bg-slate-900 rounded-xl p-4 mb-2">開啟官方即時影像 <span aria-hidden="true">↗</span></a>`
-            : `<div class="w-full h-20 rounded-xl bg-slate-900 border border-white/15 mb-2 flex items-center justify-center text-slate-400 text-xs">官方未提供可直接播放的影像連結</div>`;
-        const popupHtml = `
-          <div class="p-1 w-[240px]">
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="text-[10px] font-bold text-sky-400">官方 CCTV</span>
-              <span class="text-[10px] text-slate-400">${cam.direction || cam.region || ''}</span>
-            </div>
-            <div class="text-xs font-bold text-white mb-2">${cam.name}</div>
-            ${cameraMedia}
-            <div class="text-[10px] text-slate-400">資料來源：${cam.source || 'TDX'} · ${cam.updatedAt || '更新時間未提供'}</div>
+    function buildCCTVPopup(cam) {
+      const cameraMedia = cam.imageUrl
+        ? `<img src="${cam.imageUrl}" alt="官方監視器影像" loading="lazy" referrerpolicy="no-referrer" class="w-full h-32 object-cover rounded-xl bg-slate-900 border border-white/15 mb-2">`
+        : cam.streamUrl
+          ? `<a href="${cam.streamUrl}" target="_blank" rel="noopener" class="block text-center text-sky-300 bg-slate-900 rounded-xl p-4 mb-2">開啟官方即時影像 <span aria-hidden="true">↗</span></a>`
+          : `<div class="w-full h-20 rounded-xl bg-slate-900 border border-white/15 mb-2 flex items-center justify-center text-slate-400 text-xs">官方未提供可直接播放的影像連結</div>`;
+      return `
+        <div class="p-1 w-[240px]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] font-bold text-sky-400">官方 CCTV</span>
+            <span class="text-[10px] text-slate-400">${cam.direction || cam.region || ''}</span>
           </div>
-        `;
+          <div class="text-xs font-bold text-white mb-2">${cam.name || '道路監視器'}</div>
+          ${cameraMedia}
+          <div class="text-[10px] text-slate-400">資料來源：${cam.source || 'TDX'} · ${cam.updatedAt || '更新時間未提供'}</div>
+        </div>
+      `;
+    }
 
-        L.marker([cam.lat, cam.lng], { icon }).bindPopup(popupHtml).addTo(layers.cctv);
-      });
+    function renderCCTV() {
+      if (cctvRenderTimer) clearTimeout(cctvRenderTimer);
+      cctvRenderTimer = setTimeout(() => {
+        layers.cctv.clearLayers();
+        if (!Array.isArray(cctvData) || !cctvData.length) return;
+
+        const zoom = map.getZoom();
+        const validCameras = cctvData.filter(cam =>
+          Number.isFinite(Number(cam.lat)) &&
+          Number.isFinite(Number(cam.lng)) &&
+          Number(cam.lat) >= -90 && Number(cam.lat) <= 90 &&
+          Number(cam.lng) >= -180 && Number(cam.lng) <= 180
+        );
+
+        if (zoom < CCTV_CLUSTER_ZOOM) {
+          // 以目前縮放層級的螢幕像素網格分群，平移後只重算可見視野群組。
+          const cellSize = zoom <= 8 ? 72 : CCTV_CLUSTER_CELL_PX;
+          const clusters = new Map();
+          const bounds = map.getBounds();
+          const paddedBounds = bounds.pad(0.12);
+
+          validCameras.forEach(cam => {
+            const latlng = L.latLng(Number(cam.lat), Number(cam.lng));
+            if (!paddedBounds.contains(latlng)) return;
+            const point = map.project(latlng, zoom);
+            const gx = Math.floor(point.x / cellSize);
+            const gy = Math.floor(point.y / cellSize);
+            const key = gx + ':' + gy;
+            let group = clusters.get(key);
+            if (!group) {
+              group = { count: 0, lat: 0, lng: 0, sample: cam };
+              clusters.set(key, group);
+            }
+            group.count++;
+            group.lat += latlng.lat;
+            group.lng += latlng.lng;
+          });
+
+          clusters.forEach(group => {
+            const lat = group.lat / group.count;
+            const lng = group.lng / group.count;
+            const size = group.count >= 100 ? 42 : group.count >= 10 ? 38 : 34;
+            const icon = L.divIcon({
+              className: 'cctv-cluster-icon',
+              html: `<div style="width:${size}px;height:${size}px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(2,132,199,.94);border:2px solid rgba(224,242,254,.98);box-shadow:0 2px 9px rgba(0,0,0,.42);color:#fff;font-size:13px;font-weight:800;line-height:1">${group.count.toLocaleString('zh-TW')}</div>`,
+              iconSize: [size, size],
+              iconAnchor: [size / 2, size / 2]
+            });
+            L.marker([lat, lng], { icon, keyboard: false, riseOnHover: false })
+              .on('click', () => map.setView([lat, lng], Math.min(zoom + 2, CCTV_CLUSTER_ZOOM), { animate: false }))
+              .addTo(layers.cctv);
+          });
+          return;
+        }
+
+        // 市區高倍率：改用 Canvas 小圓點，不再使用攝影機 SVG/DOM 圖示。
+        validCameras.forEach(cam => {
+          const lat = Number(cam.lat);
+          const lng = Number(cam.lng);
+          if (!map.getBounds().pad(0.08).contains([lat, lng])) return;
+          L.circleMarker([lat, lng], {
+            renderer: cctvCanvasRenderer,
+            radius: 4,
+            color: '#e0f2fe',
+            weight: 1,
+            opacity: 0.95,
+            fillColor: '#0284c7',
+            fillOpacity: 0.98,
+            bubblingMouseEvents: false
+          }).bindPopup(buildCCTVPopup(cam), { maxWidth: 260 })
+            .addTo(layers.cctv);
+        });
+      }, 90);
     }
 
     async function loadOneSupplementalLayer(file, key, assign, render) {
@@ -867,22 +929,23 @@
       });
     }
 
-    // 只有跨越互動/標記顯示門檻時才重繪，平常縮放不重建整張路網。
+    // 路網只在跨越互動層級時重繪；CCTV 依視野重新群聚，停車場仍採高倍率顯示。
     let previousTrafficDetailMode = map.getZoom() >= 10;
-    let previousSupplementaryMarkerMode = map.getZoom() >= 11;
+    let previousParkingMarkerMode = map.getZoom() >= 11;
     map.on('zoomend', () => {
       const detailMode = map.getZoom() >= 10;
-      const markerMode = map.getZoom() >= 11;
+      const parkingMode = map.getZoom() >= 11;
       if (detailMode !== previousTrafficDetailMode) {
         previousTrafficDetailMode = detailMode;
         renderTrafficNetwork();
       }
-      if (markerMode !== previousSupplementaryMarkerMode) {
-        previousSupplementaryMarkerMode = markerMode;
-        renderCCTV();
+      renderCCTV();
+      if (parkingMode !== previousParkingMarkerMode) {
+        previousParkingMarkerMode = parkingMode;
         renderParking();
       }
     });
+    map.on('moveend', renderCCTV);
 
     // =========================================================================
     // 6. TDX 全台官方路況資料載入（不再使用隨機模擬車速）
