@@ -635,7 +635,6 @@ def fetch_supplemental_layers(bearer):
 
 def main():
     bearer=token()
-    fetch_supplemental_layers(bearer)
     all_segments=[]
     stats=[]
     shape_cache = load_shape_cache()
