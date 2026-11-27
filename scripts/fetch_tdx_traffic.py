@@ -118,6 +118,22 @@ def extract_items(payload):
                 return found
     return []
 
+def rows_v1(path, bearer):
+    result, skip, top = [], 0, 1000
+    while True:
+        query = urlencode({"$format":"JSON","$top":top,"$skip":skip})
+        payload = get_json(f"https://tdx.transportdata.tw/api/basic/v1/{path}?{query}", {
+            "Authorization":f"Bearer {bearer}",
+            "Accept":"application/json",
+            "Accept-Encoding":"gzip"
+        })
+        batch = extract_items(payload)
+        result.extend(batch)
+        if len(batch) < top:
+            return result
+        skip += len(batch)
+        time.sleep(0.6)
+
 def find_feed_metadata(payload):
     metadata = {"updateTime": "", "authorityCode": ""}
     def walk(node):
@@ -414,7 +430,7 @@ def save_supplemental_cache(cache):
     with open(SUPPLEMENTAL_CACHE_PATH,"w",encoding="utf-8") as f:
         json.dump(cache,f,ensure_ascii=False,separators=(",",":"))
 
-def cached_static_rows(path,bearer,cache):
+def cached_static_rows(path,bearer,cache,fetcher=rows):
     entry=cache.get(path)
     now=datetime.now(timezone.utc)
     if isinstance(entry,dict) and isinstance(entry.get("rows"),list):
@@ -425,7 +441,7 @@ def cached_static_rows(path,bearer,cache):
         except (TypeError,ValueError):
             pass
     try:
-        fresh=rows(path,bearer)
+        fresh=fetcher(path,bearer)
         cache[path]={"fetchedAt":now.isoformat(timespec="seconds"),"rows":fresh}
         print(f"[LAYER CACHE] {path}: refreshed {len(fresh)}")
         return fresh
@@ -563,8 +579,8 @@ def fetch_supplemental_layers(bearer):
     # Parking availability is refreshed each run; lot coordinates/name are joined by ParkingID.
     for city,label in SUPPLEMENTAL_CITIES:
         try:
-            lots=cached_static_rows(f"Parking/OffStreet/ParkingLot/City/{city}",bearer,cache)
-            availability=rows(f"Parking/OffStreet/ParkingAvailability/City/{city}",bearer)
+            lots=cached_static_rows(f"Parking/OffStreet/ParkingLot/City/{city}",bearer,cache, fetcher=rows_v1)
+            availability=rows_v1(f"Parking/OffStreet/ParkingAvailability/City/{city}",bearer)
             lot_by_id={}
             for lot in lots:
                 pid=str(field_value(lot,"ParkingID","ParkingId","ID") or "")
