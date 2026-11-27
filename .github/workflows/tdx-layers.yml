@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: tdx-supplementary-layers
+  group: tdx-supplementary-layers-v2
   cancel-in-progress: false
 
 jobs:
