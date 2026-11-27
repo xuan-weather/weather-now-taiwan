@@ -118,6 +118,23 @@ def extract_items(payload):
                 return found
     return []
 
+def find_feed_update_time(payload):
+    if isinstance(payload, dict):
+        for key in ("UpdateTime", "updateTime"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for value in payload.values():
+            found = find_feed_update_time(value) if isinstance(value, (dict, list)) else ""
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for value in payload:
+            found = find_feed_update_time(value) if isinstance(value, (dict, list)) else ""
+            if found:
+                return found
+    return ""
+
 def rows(path, bearer):
     result, skip, top = [], 0, 1000
     while True:
@@ -128,6 +145,11 @@ def rows(path, bearer):
             "Accept-Encoding":"gzip"
         })
         batch = extract_items(payload)
+        feed_time = find_feed_update_time(payload)
+        if feed_time:
+            for item in batch:
+                if isinstance(item, dict) and not any(item.get(key) for key in ("DataCollectTime", "SrcUpdateTime", "UpdateTime", "updateTime")):
+                    item["_FeedUpdateTime"] = feed_time
         result.extend(batch)
         if len(batch) < top:
             return result
@@ -255,7 +277,7 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
             "congestionLevelId":item.get("CongestionLevelID"),
             "coords":coords,
             "sourceLabel":source,
-            "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime"),"")
+            "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime","_FeedUpdateTime"),"")
         })
     return output
 
