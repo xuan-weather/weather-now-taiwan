@@ -206,6 +206,8 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
             "region":region,
             "regionLabel":label,
             "speed":speed,
+            "congestionLevel":item.get("CongestionLevel"),
+            "congestionLevelId":item.get("CongestionLevelID"),
             "coords":coords,
             "sourceLabel":source,
             "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime"),"")
