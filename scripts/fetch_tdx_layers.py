@@ -136,12 +136,10 @@ def event_point(item):
     return normalize_point(item)
 
 def fetch_incidents(bearer):
+    # TDX Road Event v1 uses Traffic/RoadEvent/LiveEvent, not Road/Traffic/LiveEvent.
     events, statuses = {}, []
-    endpoints = [
-        ("Road/Traffic/LiveEvent/Freeway","國道道路事件"),
-        ("Road/Traffic/LiveEvent/Highway","省道道路事件")
-    ] + [(f"Road/Traffic/LiveEvent/City/{code}",label+"道路事件") for code,label in CCTV_CITIES]
-    for path,label in endpoints:
+    for authority,label in (("Freeway","國道道路事件"),("Highway","省道道路事件")):
+        path=f"Traffic/RoadEvent/LiveEvent/{authority}"
         try:
             records = get_rows_v1(path,bearer)
             added = 0
@@ -156,16 +154,20 @@ def fetch_incidents(bearer):
                 road = ""
                 if isinstance(location,dict):
                     road = value(location,"Description","RoadName","Road","LocationDescription") or ""
+                    if not road:
+                        for nested in location.values():
+                            if isinstance(nested,dict):
+                                road = value(nested,"Road","RoadName","Description") or road
                 desc = value(impact,"Description") if isinstance(impact,dict) else None
-                title = value(item,"EventTitle","Title","Description","EventType") or "道路事件"
-                eid = str(value(item,"EventID","EventId","ID") or f"{path}-{len(events)}")
+                title = value(item,"Description","EventTitle","EventType","Title") or "道路事件"
+                eid = str(value(item,"EventID","EventId","ID") or f"{authority}-{len(events)}")
                 events[eid] = {
                     "id":eid,"type":classify_event(item),"title":str(title),
                     "desc":str(desc or value(item,"Comment","Remark","Description") or ""),
                     "time":str(value(item,"PublishTime","EffectiveTime","UpdateTime") or ""),
                     "lane":str(value(item,"ImpactDescription","Direction","RoadDirection") or ""),
                     "road":str(road),"lat":point[0],"lng":point[1],
-                    "source":"TDX RoadEvent","authority":label
+                    "source":"TDX RoadEvent","authority":authority
                 }
                 added += 1
             statuses.append({"source":label,"ok":True,"count":added})
@@ -176,50 +178,49 @@ def fetch_incidents(bearer):
     return list(events.values()), statuses
 
 def fetch_parking(bearer):
+    # TDX exposes the live off-street availability feed directly; do not call
+    # the unsupported ParkingLot endpoint (which returned HTTP 404).
     parking, statuses = {}, []
     for city,label in PARKING_CITIES:
         try:
-            lots = get_rows_v1(f"Parking/OffStreet/ParkingLot/City/{city}",bearer)
-            availability = get_rows_v1(f"Parking/OffStreet/ParkingAvailability/City/{city}",bearer)
-            lot_by_id = {}
-            for lot in lots:
-                pid = str(value(lot,"ParkingID","ParkingId","ID") or "")
-                point = normalize_point(lot)
-                if pid and point:
-                    lot_by_id[pid] = (lot,point)
+            records = get_rows_v1(f"Parking/OffStreet/ParkingAvailability/City/{city}",bearer)
             mapped = 0
-            for avail in availability:
-                pid = str(value(avail,"ParkingID","ParkingId","ID") or "")
-                if pid not in lot_by_id:
+            for item in records:
+                if not isinstance(item,dict):
                     continue
-                lot,point = lot_by_id[pid]
-                available = value(avail,"AvailableCar","AvailableSmallCar","AvailableCarCount","AvailableNumber")
+                point = normalize_point(item)
+                if not point:
+                    continue
+                pid = str(value(item,"ParkingID","ParkingId","ID") or f"{city}-{point[0]}-{point[1]}")
+                available = value(item,"AvailableCar","AvailableSmallCar","AvailableCarCount","AvailableNumber")
                 try:
                     available = int(float(available))
                     if available < 0:
                         continue
                 except (TypeError,ValueError):
                     continue
-                total = value(lot,"TotalCar","TotalSpaces","TotalParkingSpaces")
+                total = value(item,"TotalCar","TotalSpaces","TotalParkingSpaces")
                 try:
                     total = int(float(total)) if total is not None else None
                 except (TypeError,ValueError):
                     total = None
                 parking[pid] = {
-                    "id":pid,"name":str(value(lot,"ParkingName","Name") or f"{label}停車場"),
+                    "id":pid,
+                    "name":str(value(item,"ParkingName","ParkingLotName","Name") or f"{label}停車場"),
                     "available":available,"total":total,
-                    "rate":str(value(lot,"FareDescription","ChargeDescription","ParkingRate") or ""),
+                    "rate":str(value(item,"FareDescription","ChargeDescription","ParkingRate") or ""),
                     "lat":point[0],"lng":point[1],"region":label,
-                    "updatedAt":value(avail,"UpdateTime","SrcUpdateTime","DataCollectTime"),
+                    "updatedAt":value(item,"UpdateTime","SrcUpdateTime","DataCollectTime"),
                     "source":"TDX"
                 }
                 mapped += 1
             statuses.append({"source":f"Parking {label}","ok":True,"count":mapped})
-            print(f"[PARKING] {label}: lots={len(lots)} availability={len(availability)} mapped={mapped}")
+            print(f"[PARKING] {label}: records={len(records)} mapped={mapped}")
         except Exception as exc:
             statuses.append({"source":f"Parking {label}","ok":False,"error":str(exc)[:200]})
             print(f"[PARKING WARN] {label}: {exc}",file=sys.stderr)
     return list(parking.values()), statuses
+
 
 def main():
     parser = argparse.ArgumentParser()
