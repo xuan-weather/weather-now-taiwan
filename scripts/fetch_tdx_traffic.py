@@ -248,7 +248,85 @@ def first_text(item, keys, fallback):
             return value.strip()
     return fallback
 
-def build_segments(live_rows, shape_rows, region, label, source, section_rows=None):
+CONGESTION_CACHE_PATH = "data/tdx-congestion-definitions.json"
+CONGESTION_CACHE_TTL_SECONDS = 24 * 60 * 60
+
+def find_congestion_groups(payload):
+    found = []
+    def walk(node):
+        if isinstance(node, dict):
+            if "CongestionLevelID" in node and ("Levels" in node or "CongestionLevelName" in node):
+                found.append(node)
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(payload)
+    return found
+
+def load_congestion_cache():
+    try:
+        with open(CONGESTION_CACHE_PATH, "r", encoding="utf-8") as file:
+            value = json.load(file)
+        if isinstance(value, dict) and isinstance(value.get("definitions"), dict):
+            return value
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"definitions": {}}
+
+def get_congestion_definitions(path, bearer, cache):
+    entry = cache["definitions"].get(path)
+    now = datetime.now(timezone.utc)
+    if isinstance(entry, dict) and isinstance(entry.get("groups"), list):
+        try:
+            fetched = datetime.fromisoformat(entry.get("fetchedAt", "").replace("Z", "+00:00"))
+            if 0 <= (now - fetched).total_seconds() < CONGESTION_CACHE_TTL_SECONDS:
+                return entry["groups"]
+        except (TypeError, ValueError):
+            pass
+    try:
+        payload = get_json(f"{API_ROOT}/{path}?{urlencode({'$format':'JSON'})}", {
+            "Authorization":f"Bearer {bearer}",
+            "Accept":"application/json",
+            "Accept-Encoding":"gzip"
+        })
+        groups = find_congestion_groups(payload)
+        if not groups:
+            raise RuntimeError("TDX congestion definition returned no groups")
+        cache["definitions"][path] = {
+            "fetchedAt": now.isoformat(timespec="seconds"),
+            "groups": groups
+        }
+        print(f"[LEVEL] {path}: {len(groups)} official groups")
+        return groups
+    except Exception as exc:
+        if isinstance(entry, dict) and isinstance(entry.get("groups"), list) and entry["groups"]:
+            print(f"[LEVEL WARN] {path}: using cached definitions ({exc})", file=sys.stderr)
+            return entry["groups"]
+        print(f"[LEVEL WARN] {path}: {exc}", file=sys.stderr)
+        return []
+
+def save_congestion_cache(cache):
+    os.makedirs("data", exist_ok=True)
+    cache["generatedAt"] = datetime.now(TW).isoformat(timespec="seconds")
+    with open(CONGESTION_CACHE_PATH, "w", encoding="utf-8") as file:
+        json.dump(cache, file, ensure_ascii=False, separators=(",", ":"))
+
+def build_definition_index(groups):
+    index = {}
+    for group in groups:
+        group_id = str(group.get("CongestionLevelID", "")).strip()
+        if group_id:
+            index[group_id] = {
+                "groupName": group.get("CongestionLevelName", ""),
+                "measureIndex": group.get("MeasureIndex", ""),
+                "levels": group.get("Levels", {}).get("Level", []) if isinstance(group.get("Levels"), dict) else group.get("Levels", [])
+            }
+    return index
+
+def build_segments(live_rows, shape_rows, region, label, source, section_rows=None, level_index=None):
     shape_by_id={}
     for item in shape_rows:
         sid=section_id(item)
@@ -275,6 +353,7 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
             "speed":speed,
             "congestionLevel":item.get("CongestionLevel"),
             "congestionLevelId":item.get("CongestionLevelID"),
+            "congestionDefinition":(level_index or {}).get(str(item.get("CongestionLevelID", "")).strip()),
             "coords":coords,
             "sourceLabel":source,
             "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime","_FeedUpdateTime"),"")
@@ -286,13 +365,15 @@ def main():
     all_segments=[]
     stats=[]
     shape_cache = load_shape_cache()
-    # 即時車速每輪重新抓取；相對固定的道路線型資料使用 7 天快取。
+    level_cache = load_congestion_cache()
+    # 即時車速每輪重新抓取；道路線型快取 7 天，官方分級定義快取 24 小時。
     for live_city, shape_city in CITY_PAIRS:
         city_code, label, region = live_city
         try:
             live = rows(f"Road/Traffic/Live/City/{city_code}", bearer)
             shapes = cached_shape_rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer, shape_cache)
-            segments = build_segments(live, shapes, region, label, "TDX 縣市即時路況")
+            level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/City/{city_code}", bearer, level_cache)
+            segments = build_segments(live, shapes, region, label, "TDX 縣市即時路況", level_index=build_definition_index(level_groups))
             all_segments.extend(segments)
             stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
             print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)}")
@@ -305,7 +386,8 @@ def main():
         try:
             live = rows(f"Road/Traffic/Live/{category}", bearer)
             shapes = cached_shape_rows(f"Road/Traffic/SectionShape/{category}", bearer, shape_cache)
-            segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況")
+            level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/{category}", bearer, level_cache)
+            segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況", level_index=build_definition_index(level_groups))
             all_segments.extend(segments)
             stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
             print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)}")
@@ -315,6 +397,7 @@ def main():
     if not all_segments:
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
     save_shape_cache(shape_cache)
+    save_congestion_cache(level_cache)
     payload={
         "source":"交通部 TDX 路況資訊 v2",
         "generatedAt":datetime.now(TW).isoformat(timespec="seconds"),
