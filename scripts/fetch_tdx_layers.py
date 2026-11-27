@@ -10,9 +10,10 @@ from urllib.parse import urlencode
 
 import fetch_tdx_traffic as tdx
 
-# The layers run as separate parallel jobs. Keep a modest per-job request pace;
-# the shared helper still honors TDX Retry-After responses for HTTP 429.
-tdx.MIN_REQUEST_INTERVAL = 1.0
+# TDX rate limits are shared across all layer endpoints and credentials.
+# Keep the same conservative 15-second pacing as the main traffic collector;
+# never override it with a faster per-layer interval.
+tdx.MIN_REQUEST_INTERVAL = 15.0
 tdx._last_request_at = 0.0
 
 TW = timezone(timedelta(hours=8))
