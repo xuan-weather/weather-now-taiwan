@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>台灣即時路況地圖 | Live Traffic Map</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Google Fonts: Inter & Noto Sans TC -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Inter', 'Noto Sans TC', sans-serif;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #0f172a;
+    }
+
+    #map {
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+    }
+
+    /* 毛玻璃懸浮面板 */
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.78);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.55);
+      color: #f8fafc;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .glass-panel-light {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      box-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.18);
+      color: #0f172a;
+    }
+
+    /* 隱藏原生 Leaflet 預設控制項與歸屬字樣微調 */
+    .leaflet-control-zoom {
+      display: none !important;
+    }
+    .leaflet-control-attribution {
+      background: rgba(15, 23, 42, 0.65) !important;
+      color: rgba(255, 255, 255, 0.6) !important;
+      font-size: 10px !important;
+      border-top-left-radius: 8px;
+      padding: 2px 6px !important;
+    }
+    .leaflet-control-attribution a {
+      color: #38bdf8 !important;
+    }
+
+    /* 自訂 Popup 樣式 */
+    .leaflet-popup-content-wrapper {
+      background: rgba(15, 23, 42, 0.92) !important;
+      backdrop-filter: blur(12px);
+      color: #f8fafc !important;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 14px !important;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6) !important;
+      padding: 2px;
+    }
+    .leaflet-popup-tip {
+      background: rgba(15, 23, 42, 0.92) !important;
+    }
+    .leaflet-popup-close-button {
+      color: #94a3b8 !important;
+      font-size: 18px !important;
+      padding: 6px 8px 0 0 !important;
+    }
+    .leaflet-popup-close-button:hover {
+      color: #fff !important;
+    }
+
+    /* 路況線條發光效果 */
+    .traffic-glow {
+      filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.65));
+      transition: stroke 0.6s ease, stroke-width 0.3s ease;
+    }
+
+    /* 自訂標記動畫 */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.85); opacity: 0.9; }
+      70% { transform: scale(1.65); opacity: 0; }
+      100% { transform: scale(1.65); opacity: 0; }
+    }
+    .marker-pulse {
+      animation: pulse-ring 2s infinite cubic-bezier(0.24, 0, 0.38, 1);
+    }
+
+    /* 自訂捲軸 */
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.35);
+      border-radius: 9999px;
+    }
+
+    /* 模擬 CCTV 掃描線 */
+    .cctv-scanline {
+      background: linear-gradient(
+        to bottom,
+        rgba(255,255,255,0),
+        rgba(255,255,255,0) 50%,
+        rgba(0,0,0,0.28) 50%,
+        rgba(0,0,0,0.28)
+      );
+      background-size: 100% 4px;
+    }
+  </style>
+</head>
+<body class="select-none">
+
+  <!-- 全螢幕地圖容器 -->
+  <div id="map"></div>
+
+  <!-- =========================================================
+       左上角：極簡搜尋與地區快速跳轉懸浮框
+  ========================================================= -->
+  <div class="fixed top-3 left-3 sm:top-4 sm:left-4 z-[1000] flex flex-col gap-2 max-w-[calc(100vw-88px)] sm:max-w-sm w-full pointer-events-none">
+    <!-- 搜尋與即時狀態膠囊 -->
+    <div id="top-search-box" class="glass-panel rounded-2xl p-2 flex items-center gap-2 pointer-events-auto">
+      <div class="flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+        </svg>
+      </div>
+      <div class="relative flex-1 min-w-0">
+        <input
+          id="road-search-input"
+          type="text"
+          placeholder="搜尋路段、國道或地點 (如: 鼎金、九如路、國道1號)..."
+          class="w-full bg-transparent text-xs sm:text-sm placeholder-slate-400 focus:outline-none pr-6 truncate"
+          autocomplete="off"
+        />
+        <button id="clear-search-btn" class="hidden absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 搜尋建議下拉清單 -->
+    <div id="search-results" class="hidden glass-panel rounded-2xl p-1.5 max-h-56 overflow-y-auto pointer-events-auto text-xs"></div>
+
+    <!-- 全台縣市快速定位：22 縣市皆可選 -->
+    <div class="flex items-center gap-2 pointer-events-auto">
+      <select id="region-select" aria-label="選擇全台縣市或區域" onchange="flyToRegion(this.value)"
+        class="glass-panel min-w-0 flex-1 rounded-full px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-sky-400">
+        <option value="taiwan">全台灣總覽</option>
+        <optgroup label="北部">
+          <option value="taipei">臺北市</option><option value="newtaipei">新北市</option><option value="keelung">基隆市</option><option value="taoyuan">桃園市</option><option value="hsinchu_city">新竹市</option><option value="hsinchu_county">新竹縣</option><option value="yilan">宜蘭縣</option>
+        </optgroup>
+        <optgroup label="中部">
+          <option value="taichung">臺中市</option><option value="miaoli">苗栗縣</option><option value="changhua">彰化縣</option><option value="nantou">南投縣</option><option value="yunlin">雲林縣</option>
+        </optgroup>
+        <optgroup label="南部">
+          <option value="chiayi_city">嘉義市</option><option value="chiayi_county">嘉義縣</option><option value="tainan">臺南市</option><option value="kaohsiung">高雄市</option><option value="pingtung">屏東縣</option>
+        </optgroup>
+        <optgroup label="東部及離島">
+          <option value="hualien">花蓮縣</option><option value="taitung">臺東縣</option><option value="penghu">澎湖縣</option><option value="kinmen">金門縣</option><option value="lienchiang">連江縣</option>
+        </optgroup>
+      </select>
+      <button onclick="flyToRegion('taiwan')" data-region="taiwan" class="region-btn active-region shrink-0 px-3 py-2 rounded-full text-xs font-semibold bg-sky-500 text-white shadow-lg shadow-sky-500/30 whitespace-nowrap transition">全台路網</button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       右上角：懸浮圖層控制面板 (可收合 / 展開)
+  ========================================================= -->
+  <div class="fixed top-3 right-3 sm:top-4 sm:right-4 z-[1000] flex flex-col items-end gap-2">
+    <!-- 展開/收合觸發按鈕 -->
+    <button
+      id="layer-toggle-btn"
+      onclick="toggleLayerPanel()"
+      class="glass-panel rounded-2xl px-3.5 py-2.5 flex items-center gap-2 text-xs sm:text-sm font-medium hover:bg-white/15 active:scale-95 transition"
+      title="圖層與底圖設定"
+    >
+      <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+      </svg>
+      <span class="hidden sm:inline">路況圖層</span>
+      <span id="active-layer-badge" class="px-1.5 py-0.5 text-[10px] rounded-full bg-sky-500/25 text-sky-300 font-semibold">4</span>
+    </button>
+
+    <!-- 圖層面板內容 -->
+    <div id="layer-panel" class="glass-panel rounded-2xl p-3.5 w-64 sm:w-72 flex flex-col gap-3 origin-top-right">
+      <div class="flex items-center justify-between border-b border-white/10 pb-2">
+        <span class="text-xs font-bold tracking-wider uppercase text-slate-300">即時資訊圖層</span>
+        <button onclick="toggleLayerPanel()" class="text-slate-400 hover:text-white p-1 rounded-lg">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- 圖層開關列表 -->
+      <div class="flex flex-col gap-2 text-xs">
+        <!-- 1. 即時路況路網 -->
+        <label class="flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
+            <div>
+              <div class="font-medium">即時路況路網</div>
+              <div class="text-[10px] text-slate-400">國道、快速道路與市區幹道車速</div>
+            </div>
+          </div>
+          <input type="checkbox" id="chk-traffic" checked onchange="toggleMapLayer('traffic', this.checked)" class="accent-sky-500 w-4 h-4 rounded cursor-pointer" />
+        </label>
+
+        <!-- 2. 事故與施工通報 -->
+        <label class="flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]"></span>
+            <div>
+              <div class="font-medium">事故與施工通報</div>
+              <div class="text-[10px] text-slate-400">車禍、道路施工、散落物與管制</div>
+            </div>
+          </div>
+          <input type="checkbox" id="chk-incidents" checked onchange="toggleMapLayer('incidents', this.checked)" class="accent-sky-500 w-4 h-4 rounded cursor-pointer" />
+        </label>
+
+        <!-- 3. 即時路況監視器 CCTV -->
+        <label class="flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf8]"></span>
+            <div>
+              <div class="font-medium">即時路況監視器 (CCTV)</div>
+              <div class="text-[10px] text-slate-400">重要交流道與路口即時影像</div>
+            </div>
+          </div>
+          <input type="checkbox" id="chk-cctv" checked onchange="toggleMapLayer('cctv', this.checked)" class="accent-sky-500 w-4 h-4 rounded cursor-pointer" />
+        </label>
+
+        <!-- 4. 周邊停車場空位 -->
+        <label class="flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-indigo-400 shadow-[0_0_8px_#818cf8]"></span>
+            <div>
+              <div class="font-medium">停車場即時空位</div>
+              <div class="text-[10px] text-slate-400">公有與立體停車場剩餘格位</div>
+            </div>
+          </div>
+          <input type="checkbox" id="chk-parking" checked onchange="toggleMapLayer('parking', this.checked)" class="accent-sky-500 w-4 h-4 rounded cursor-pointer" />
+        </label>
+      </div>
+
+      <!-- 底圖樣式切換 -->
+      <div class="pt-1 border-t border-white/10">
+        <div class="text-[11px] font-semibold text-slate-400 mb-2">底圖樣式</div>
+        <div class="grid grid-cols-3 gap-1.5 text-[11px] font-medium">
+          <button onclick="switchBaseMap('dark')" id="base-dark" class="base-btn py-1.5 px-2 rounded-xl bg-sky-500 text-white text-center transition">
+            深色夜視
+          </button>
+          <button onclick="switchBaseMap('light')" id="base-light" class="base-btn py-1.5 px-2 rounded-xl bg-white/10 hover:bg-white/20 text-center transition">
+            淺色街道
+          </button>
+          <button onclick="switchBaseMap('satellite')" id="base-satellite" class="base-btn py-1.5 px-2 rounded-xl bg-white/10 hover:bg-white/20 text-center transition">
+            衛星混合
+          </button>
+        </div>
+      </div>
+
+      <!-- 模擬通報按鈕 -->
+      <button
+        id="report-mode-btn"
+        onclick="toggleReportMode()"
+        class="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/90 to-orange-600/90 hover:from-amber-500 hover:to-orange-600 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-lg shadow-orange-500/20 active:scale-98 transition"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.3" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span id="report-mode-text">點擊地圖通報新路況</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       通報模式提示橫幅 (僅在開啟通報模式時顯示)
+  ========================================================= -->
+  <div id="report-banner" class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-[1001] glass-panel border-amber-400/50 rounded-full px-4 py-2 flex items-center gap-3 text-xs shadow-2xl">
+    <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+    <span class="font-medium text-amber-200">請在地圖上點選要回報事故或壅塞的位置</span>
+    <button onclick="toggleReportMode(false)" class="px-2 py-0.5 rounded-full bg-white/15 hover:bg-white/25 text-white font-medium">取消</button>
+  </div>
+
+  <!-- =========================================================
+       通報表單懸浮視窗 (點擊地圖後彈出)
+  ========================================================= -->
+  <div id="report-modal" class="hidden fixed inset-0 z-[1100] flex items-center justify-center bg-black/45 backdrop-blur-xs p-4">
+    <div class="glass-panel rounded-2xl p-4 w-full max-w-xs flex flex-col gap-3">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
+          <span class="text-amber-400">⚠️</span> 新增即時路況回報
+        </h3>
+        <button onclick="closeReportModal()" class="text-slate-400 hover:text-white p-1">✕</button>
+      </div>
+      <div id="report-coords-label" class="text-[11px] text-slate-400">座標：--</div>
+
+      <div class="flex flex-col gap-2 text-xs">
+        <label class="text-slate-300 font-medium">事件類型</label>
+        <select id="report-type" class="bg-slate-800/90 border border-white/15 rounded-xl p-2 text-white focus:outline-none">
+          <option value="accident">💥 車禍事故（佔用車道）</option>
+          <option value="roadwork">🚧 道路施工管制</option>
+          <option value="breakdown">🔧 車輛故障拋錨</option>
+          <option value="congestion">🚗 突發車多壅塞</option>
+        </select>
+
+        <label class="text-slate-300 font-medium mt-1">路段名稱 / 簡述</label>
+        <input id="report-title" type="text" placeholder="例如：九如一路西向靠近交流道" class="bg-slate-800/90 border border-white/15 rounded-xl p-2 text-white placeholder-slate-500 focus:outline-none" />
+
+        <label class="text-slate-300 font-medium mt-1">影響說明</label>
+        <input id="report-desc" type="text" placeholder="例如：外側車道受阻，請提前變換車道" class="bg-slate-800/90 border border-white/15 rounded-xl p-2 text-white placeholder-slate-500 focus:outline-none" />
+      </div>
+
+      <div class="flex gap-2 mt-1">
+        <button onclick="closeReportModal()" class="flex-1 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-medium">取消</button>
+        <button onclick="submitNewReport()" class="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold">送出通報</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       左下角：懸浮路況圖例 & 即時更新狀態列
+  ========================================================= -->
+  <div class="fixed bottom-4 left-3 sm:bottom-5 sm:left-4 z-[1000] pointer-events-none max-w-[calc(100vw-80px)]">
+    <div id="legend-panel" class="glass-panel rounded-2xl px-3 py-2.5 pointer-events-auto flex flex-col gap-2">
+      <!-- 顏色車速對照 -->
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium">
+        <div class="flex items-center gap-1.5">
+          <span class="w-3 h-1.5 rounded-full bg-[#10b981] shadow-[0_0_6px_#10b981]"></span>
+          <span>順暢 <span class="text-slate-400 text-[10px]">&gt;60</span></span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-3 h-1.5 rounded-full bg-[#eab308] shadow-[0_0_6px_#eab308]"></span>
+          <span>車多 <span class="text-slate-400 text-[10px]">40-60</span></span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-3 h-1.5 rounded-full bg-[#f97316] shadow-[0_0_6px_#f97316]"></span>
+          <span>壅塞 <span class="text-slate-400 text-[10px]">20-40</span></span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="w-3 h-1.5 rounded-full bg-[#ef4444] shadow-[0_0_6px_#ef4444]"></span>
+          <span>嚴重 <span class="text-slate-400 text-[10px]">&lt;20 km/h</span></span>
+        </div>
+      </div>
+
+      <!-- 更新時間與自動模擬開關 -->
+      <div class="flex items-center justify-between gap-3 pt-1.5 border-t border-white/10 text-[10px] text-slate-300">
+        <div class="flex items-center gap-1.5">
+          <span id="live-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>更新：<span id="last-update-time" class="font-mono text-white">--:--:--</span></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="simulateTrafficUpdate(true)" class="hover:text-sky-400 flex items-center gap-0.5 transition" title="立即刷新路況">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            刷新
+          </button>
+          <label class="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" id="auto-live-toggle" checked onchange="toggleAutoSimulation(this.checked)" class="accent-emerald-400 w-3 h-3 rounded" />
+            <span>即時動態</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       右下角：懸浮地圖縮放與定位控制按鈕
+  ========================================================= -->
+  <div class="fixed bottom-6 right-3 sm:bottom-7 sm:right-4 z-[1000] flex flex-col gap-2">
+    <!-- 定位目前位置 -->
+    <button
+      onclick="locateUser()"
+      class="glass-panel w-10 h-10 rounded-2xl flex items-center justify-center hover:bg-white/15 active:scale-95 transition text-sky-400"
+      title="定位我的位置"
+    >
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" class="hidden" />
+        <circle cx="12" cy="12" r="3" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v3m0 14v3M2 12h3m14 0h3" />
+      </svg>
+    </button>
+
+    <!-- 放大 / 縮小群組 -->
+    <div class="glass-panel rounded-2xl flex flex-col overflow-hidden">
+      <button
+        onclick="map.zoomIn()"
+        class="w-10 h-10 flex items-center justify-center hover:bg-white/15 active:bg-white/25 transition border-b border-white/10 text-lg font-bold"
+        title="放大"
+      >+</button>
+      <button
+        onclick="map.zoomOut()"
+        class="w-10 h-10 flex items-center justify-center hover:bg-white/15 active:bg-white/25 transition text-lg font-bold"
+        title="縮小"
+      >−</button>
+    </div>
+  </div>
+
+  <!-- Toast 輕量訊息提示 -->
+  <div id="toast-msg" class="fixed top-16 left-1/2 -translate-x-1/2 z-[1200] pointer-events-none opacity-0 transition-opacity duration-300">
+    <div class="glass-panel rounded-full px-4 py-1.5 text-xs font-medium text-white shadow-xl"></div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. 初始化地圖與底圖圖層
+    // =========================================================================
+    const baseLayers = {
+      dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 19
+      }),
+      light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 19
+      }),
+      satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+        maxZoom: 19
+      })
+    };
+
+    // 預設聚焦於高雄市三民區與鼎金系統交流道周邊
+    const map = L.map('map', {
+      center: [23.7500, 120.9500],
+      zoom: 7,
+      layers: [baseLayers.dark],
+      zoomControl: false
+    });
+
+    let currentBaseMap = 'dark';
+
+    // 圖層群組
+    const layers = {
+      traffic: L.layerGroup().addTo(map),
+      incidents: L.layerGroup().addTo(map),
+      cctv: L.layerGroup().addTo(map),
+      parking: L.layerGroup().addTo(map)
+    };
+
+    // =========================================================================
+    // 2. 台灣主要道路即時路況資料 (高雄三民區、國1、國10、台北、台中)
+    // =========================================================================
+    let roadSegments = []; // 由 TDX 全台官方即時路況資料載入
+
+    // =========================================================================
+    // 3. 事故、施工、CCTV 監視器與停車場資料
+    // =========================================================================
+    const incidentsData = [
+      {
+        id: 'inc-1',
+        type: 'accident',
+        title: '國道1號南下 366.5K (近九如交流道) 兩車追撞',
+        desc: '佔用外側車道與路肩，後方回堵約 2.5 公里，拖吊車已抵達現場處理中。',
+        time: '18:54 通報',
+        lane: '外側車道受阻',
+        lat: 22.6515,
+        lng: 120.3342
+      },
+      {
+        id: 'inc-2',
+        type: 'roadwork',
+        title: '九如一路與民族一路口 管線鋪面施工',
+        desc: '縮減為單線雙向通行，尖峰時段車流緩慢，請提前改道建國路或十全路。',
+        time: '預計 22:00 結束',
+        lane: '東向外側車道封閉',
+        lat: 22.6433,
+        lng: 120.3145
+      },
+      {
+        id: 'inc-3',
+        type: 'breakdown',
+        title: '鼎金系統交流道 國10轉國1南下匝道故障車',
+        desc: '一輛小貨車故障停靠匝道內側，警廣已通報國道警察前往警戒。',
+        time: '19:08 通報',
+        lane: '匝道內側受阻',
+        lat: 22.6768,
+        lng: 120.3272
+      },
+      {
+        id: 'inc-4',
+        type: 'accident',
+        title: '台北市建國高架北上 近忠孝東路匝道擦撞',
+        desc: '兩部自小客車擦撞，已移置路肩等待員警測繪，車流略為回堵。',
+        time: '19:02 通報',
+        lane: '路肩處理中',
+        lat: 25.0445,
+        lng: 121.5374
+      },
+      {
+        id: 'inc-5',
+        type: 'congestion',
+        title: '台中市臺灣大道三段 往市區方向下班車潮',
+        desc: '百貨商圈周邊車流量大，號誌週期調整中，平均時速約 20 km/h。',
+        time: '即時偵測',
+        lane: '全線車多壅塞',
+        lat: 24.1672,
+        lng: 120.6458
+      }
+    ];
+
+    const cctvData = [
+      {
+        id: 'cam-1',
+        name: '國道1號 鼎金系統交流道北側 (362K)',
+        direction: '南向視角',
+        flow: '車多壅塞 • 1,840 輛/時',
+        lat: 22.6752,
+        lng: 120.3282
+      },
+      {
+        id: 'cam-2',
+        name: '高雄市三民區 九如一路 / 國1交流道口',
+        direction: '西向視角',
+        flow: '嚴重壅塞 • 2,120 輛/時',
+        lat: 22.6431,
+        lng: 120.3348
+      },
+      {
+        id: 'cam-3',
+        name: '高雄市三民區 博愛一路 / 十全一路口',
+        direction: '北向視角',
+        flow: '車流順暢 • 1,150 輛/時',
+        lat: 22.6482,
+        lng: 120.3029
+      },
+      {
+        id: 'cam-4',
+        name: '國道1號 圓山交流道 (23K)',
+        direction: '北向視角',
+        flow: '車多緩慢 • 2,310 輛/時',
+        lat: 25.0735,
+        lng: 121.5315
+      },
+      {
+        id: 'cam-5',
+        name: '台中市 臺灣大道 / 惠中路口',
+        direction: '東向視角',
+        flow: '車多壅塞 • 1,960 輛/時',
+        lat: 24.1655,
+        lng: 120.6478
+      }
+    ];
+
+    const parkingData = [
+      { id: 'pk-1', name: '高雄車站地下停車場', available: 142, total: 450, rate: '30元/時', lat: 22.6392, lng: 120.3028 },
+      { id: 'pk-2', name: '三民區公所立體停車場', available: 28, total: 180, rate: '20元/時', lat: 22.6465, lng: 120.3215 },
+      { id: 'pk-3', name: '科工館南館地下停車場', available: 95, total: 320, rate: '30元/時', lat: 22.6408, lng: 120.3235 },
+      { id: 'pk-4', name: '河堤社區鼎泰廣場停車場', available: 7, total: 110, rate: '30元/時', lat: 22.6625, lng: 120.3125 },
+      { id: 'pk-5', name: '台北市民大道敦延段停車場', available: 54, total: 380, rate: '40元/時', lat: 25.0452, lng: 121.5515 },
+      { id: 'pk-6', name: '台中市政公園地下停車場', available: 118, total: 600, rate: '20元/時', lat: 24.1618, lng: 120.6468 }
+    ];
+
+    // =========================================================================
+    // 4. 路況顏色與繪製引擎
+    // =========================================================================
+    const polylineMap = {};
+
+    const TRAFFIC_STALE_AFTER_MS = 30 * 60 * 1000; // 超過 30 分鐘視為過期
+    const MAX_REASONABLE_SPEED_KMH = 200;
+
+    function parseTrafficTimestamp(value) {
+      if (value === null || value === undefined || value === '') return NaN;
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : NaN;
+    }
+
+    function getSegmentTimestamp(seg, generatedAt) {
+      const candidates = [
+        seg.updateTime, seg.UpdateTime, seg.updatedAt, seg.UpdatedAt,
+        seg.dataTime, seg.DataTime, seg.timestamp, seg.Timestamp,
+        seg.observedAt, seg.ObservedAt, generatedAt
+      ];
+      for (const value of candidates) {
+        const parsed = parseTrafficTimestamp(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      return NaN;
+    }
+
+    function getSegmentIdentity(seg) {
+      const stableId = seg.segmentId ?? seg.SegmentID ?? seg.linkId ??
+        seg.LinkID ?? seg.roadSegmentId ?? seg.RoadSegmentID ?? seg.id;
+      if (stableId !== undefined && stableId !== null && String(stableId).trim()) {
+        return `${seg.sourceLabel || seg.source || 'TDX'}:${String(stableId).trim()}`;
+      }
+      const coordsKey = Array.isArray(seg.coords)
+        ? seg.coords.map(point => Array.isArray(point)
+          ? point.map(n => Number(n).toFixed(5)).join(',')
+          : '').join(';')
+        : '';
+      return `${seg.sourceLabel || seg.source || 'TDX'}:${String(seg.roadName || seg.name || '').trim()}:${String(seg.direction || '')}:${coordsKey}`;
+    }
+
+    // 同一路段只保留時間最新的一筆，避免不同批次重複疊線。
+    function normalizeTrafficSegments(segments, generatedAt) {
+      const latestByRoad = new Map();
+      for (const seg of segments) {
+        if (!seg || !Array.isArray(seg.coords) || seg.coords.length < 2) continue;
+        const speed = Number(seg.speed);
+        if (!Number.isFinite(speed) || speed < 0 || speed > MAX_REASONABLE_SPEED_KMH) continue;
+        const timestamp = getSegmentTimestamp(seg, generatedAt);
+        const key = getSegmentIdentity(seg);
+        const previous = latestByRoad.get(key);
+        if (!previous ||
+            (Number.isFinite(timestamp) &&
+              (!Number.isFinite(previous._trafficTimestamp) || timestamp >= previous._trafficTimestamp)) ||
+            (!Number.isFinite(timestamp) && !Number.isFinite(previous._trafficTimestamp))) {
+          latestByRoad.set(key, {
+            ...seg,
+            _trafficTimestamp: timestamp,
+            _speedValid: speed > 0,
+            _stale: !Number.isFinite(timestamp) ||
+              (Date.now() - timestamp > TRAFFIC_STALE_AFTER_MS) ||
+              (timestamp - Date.now() > 5 * 60 * 1000)
+          });
+        }
+      }
+      return Array.from(latestByRoad.values());
+    }
+
+    function getSpeedStyle(speed, stale = false, speedValid = true) {
+      if (stale || !speedValid) {
+        return {
+          color: '#94a3b8',
+          label: stale ? '資料過期' : '車速待確認',
+          badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40'
+        };
+      }
+      if (speed > 60) {
+        return { color: '#10b981', label: '順暢', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
+      } else if (speed >= 40) {
+        return { color: '#eab308', label: '車多', badgeClass: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40' };
+      } else if (speed >= 20) {
+        return { color: '#f97316', label: '壅塞', badgeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/40' };
+      } else {
+        return { color: '#ef4444', label: '嚴重壅塞', badgeClass: 'bg-red-500/20 text-red-300 border-red-500/40' };
+      }
+    }
+
+    function renderTrafficNetwork() {
+      layers.traffic.clearLayers();
+      Object.keys(polylineMap).forEach(key => delete polylineMap[key]);
+
+      roadSegments.forEach(seg => {
+        if (!Array.isArray(seg.coords) || seg.coords.length < 2 || !Number.isFinite(Number(seg.speed))) return;
+        const speed = Number(seg.speed);
+        const style = getSpeedStyle(speed, seg._stale, seg._speedValid);
+        const opacity = (seg._stale || !seg._speedValid) ? 0.72 : 0.96;
+        const outline = L.polyline(seg.coords, {
+          color: '#020617', weight: 8, opacity: 0.58,
+          lineCap: 'round', lineJoin: 'round'
+        });
+        const line = L.polyline(seg.coords, {
+          color: style.color, weight: 5, opacity,
+          lineCap: 'round', lineJoin: 'round', className: 'traffic-glow'
+        });
+        const timestampText = Number.isFinite(seg._trafficTimestamp)
+          ? new Date(seg._trafficTimestamp).toLocaleString('zh-TW', { hour12: false })
+          : (seg.updateTime || '無可確認時間');
+        const speedText = seg._speedValid
+          ? `${Math.round(speed)} <span class="text-[10px] font-normal text-slate-300">km/h</span>`
+          : '<span class="text-sm">車速資料待確認（0 km/h）</span>';
+        const popupHtml = `
+          <div class="p-1 min-w-[210px]">
+            <div class="flex items-center justify-between gap-2 mb-1.5">
+              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${style.badgeClass}">${style.label}</span>
+              <span class="text-[10px] text-slate-400">${seg.sourceLabel || 'TDX 官方路況'}</span>
+            </div>
+            <div class="text-xs font-bold text-white mb-2 leading-snug">${seg.name || seg.roadName || '未命名路段'}</div>
+            <div class="bg-white/5 rounded-xl p-2 text-center">
+              <div class="text-[10px] text-slate-400">${seg._speedValid ? '官方即時平均車速' : '車速有效性檢查'}</div>
+              <div class="text-base font-extrabold" style="color:${style.color}">${speedText}</div>
+            </div>
+            <div class="text-[10px] text-slate-400 mt-2">路段編號：${seg.id ?? seg.segmentId ?? '未提供'}</div>
+            <div class="text-[10px] text-slate-400">資料時間：${timestampText}</div>
+            ${seg._stale ? '<div class="text-[10px] text-slate-300 mt-1">資料超過 30 分鐘，已改以灰色標示，不列入即時壅塞判讀</div>' : ''}
+          </div>
+        `;
+        line.bindPopup(popupHtml);
+        line.on('mouseover', function () { this.setStyle({ weight: 7 }); });
+        line.on('mouseout', function () { this.setStyle({ weight: 5 }); });
+        outline.addTo(layers.traffic);
+        line.addTo(layers.traffic);
+        polylineMap[getSegmentIdentity(seg)] = line;
+      });
+    }
+
+    // =========================================================================
+    // 5. 繪製事件、CCTV 與停車場標記
+    // =========================================================================
+    function getIncidentVisual(type) {
+      switch (type) {
+        case 'accident':
+          return { emoji: '💥', bg: 'bg-red-500', ring: 'bg-red-500', label: '車禍事故' };
+        case 'roadwork':
+          return { emoji: '🚧', bg: 'bg-amber-500', ring: 'bg-amber-500', label: '道路施工' };
+        case 'breakdown':
+          return { emoji: '🔧', bg: 'bg-orange-500', ring: 'bg-orange-500', label: '車輛故障' };
+        default:
+          return { emoji: '⚠️', bg: 'bg-yellow-500', ring: 'bg-yellow-500', label: '壅塞通報' };
+      }
+    }
+
+    function renderIncidents() {
+      layers.incidents.clearLayers();
+      incidentsData.forEach(inc => {
+        const vis = getIncidentVisual(inc.type);
+        const icon = L.divIcon({
+          className: 'custom-div-icon',
+          html: `
+            <div class="relative flex items-center justify-center w-8 h-8">
+              <span class="marker-pulse absolute inset-0 rounded-full ${vis.ring} opacity-60"></span>
+              <div class="relative w-7 h-7 rounded-full ${vis.bg} border-2 border-white shadow-lg flex items-center justify-center text-xs">
+                ${vis.emoji}
+              </div>
+            </div>
+          `,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16]
+        });
+
+        const popupHtml = `
+          <div class="p-1 max-w-[235px]">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-500/20 text-red-300 border border-red-500/30">${vis.label}</span>
+              <span class="text-[10px] text-slate-400">${inc.time}</span>
+            </div>
+            <div class="text-xs font-bold text-white mb-1 leading-snug">${inc.title}</div>
+            <p class="text-[11px] text-slate-300 leading-relaxed mb-2">${inc.desc}</p>
+            <div class="text-[10px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-2 py-1">
+              影響範圍：${inc.lane}
+            </div>
+          </div>
+        `;
+
+        L.marker([inc.lat, inc.lng], { icon }).bindPopup(popupHtml).addTo(layers.incidents);
+      });
+    }
+
+    function renderCCTV() {
+      layers.cctv.clearLayers();
+      cctvData.forEach(cam => {
+        const icon = L.divIcon({
+          className: 'custom-div-icon',
+          html: `
+            <div class="w-7 h-7 rounded-xl bg-sky-600/95 border border-sky-200 shadow-lg flex items-center justify-center text-white hover:scale-110 transition">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </div>
+          `,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        });
+
+        // 動態 SVG 模擬即時路況監視器畫面
+        const popupHtml = `
+          <div class="p-1 w-[240px]">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-[10px] font-bold text-sky-400 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span> LIVE CCTV
+              </span>
+              <span class="text-[10px] text-slate-400">${cam.direction}</span>
+            </div>
+            <div class="text-xs font-bold text-white mb-2">${cam.name}</div>
+
+            <!-- 模擬路況攝影機畫面 -->
+            <div class="relative w-full h-28 rounded-xl overflow-hidden bg-slate-900 border border-white/15 mb-2">
+              <svg viewBox="0 0 240 110" class="w-full h-full">
+                <defs>
+                  <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#0f172a"/>
+                    <stop offset="100%" stop-color="#1e293b"/>
+                  </linearGradient>
+                </defs>
+                <rect width="240" height="110" fill="url(#skyGrad)"/>
+                <!-- 遠景城市燈光 -->
+                <circle cx="30" cy="32" r="1.5" fill="#fbbf24" opacity="0.7"/>
+                <circle cx="55" cy="28" r="1.2" fill="#38bdf8" opacity="0.7"/>
+                <circle cx="195" cy="30" r="1.5" fill="#fbbf24" opacity="0.8"/>
+                <circle cx="215" cy="35" r="1.2" fill="#f87171" opacity="0.7"/>
+                <!-- 透視道路 -->
+                <polygon points="95,42 145,42 225,110 15,110" fill="#334155"/>
+                <line x1="120" y1="42" x2="120" y2="110" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,6"/>
+                <!-- 車頭燈與車尾燈光軌 -->
+                <ellipse cx="95" cy="72" rx="4" ry="2.5" fill="#ef4444"/>
+                <ellipse cx="106" cy="72" rx="4" ry="2.5" fill="#ef4444"/>
+                <ellipse cx="85" cy="92" rx="5" ry="3" fill="#ef4444"/>
+                <ellipse cx="100" cy="92" rx="5" ry="3" fill="#ef4444"/>
+                <ellipse cx="136" cy="68" rx="3.5" ry="2" fill="#fef08a"/>
+                <ellipse cx="145" cy="68" rx="3.5" ry="2" fill="#fef08a"/>
+                <ellipse cx="146" cy="88" rx="5" ry="3" fill="#fef08a"/>
+                <ellipse cx="160" cy="88" rx="5" ry="3" fill="#fef08a"/>
+              </svg>
+              <div class="cctv-scanline absolute inset-0 pointer-events-none"></div>
+              <div class="absolute top-1.5 left-2 text-[9px] font-mono text-emerald-400 bg-black/60 px-1.5 py-0.5 rounded">
+                CAM-${cam.id.toUpperCase()} • 30FPS
+              </div>
+              <div class="absolute bottom-1.5 right-2 text-[9px] font-mono text-white/80 bg-black/60 px-1.5 py-0.5 rounded">
+                ${new Date().toLocaleTimeString('zh-TW', { hour12: false })}
+              </div>
+            </div>
+
+            <div class="text-[11px] text-slate-300 flex items-center justify-between bg-white/5 px-2.5 py-1.5 rounded-lg">
+              <span>車流偵測：</span>
+              <span class="font-semibold text-sky-300">${cam.flow}</span>
+            </div>
+          </div>
+        `;
+
+        L.marker([cam.lat, cam.lng], { icon }).bindPopup(popupHtml).addTo(layers.cctv);
+      });
+    }
+
+    function renderParking() {
+      layers.parking.clearLayers();
+      parkingData.forEach(pk => {
+        const isLow = pk.available < 15;
+        const badgeColor = isLow ? 'bg-rose-600 border-rose-200' : 'bg-indigo-600 border-indigo-200';
+
+        const icon = L.divIcon({
+          className: 'custom-div-icon',
+          html: `
+            <div class="px-1.5 h-6 rounded-lg ${badgeColor} border shadow-md flex items-center justify-center gap-1 text-white text-[10px] font-bold whitespace-nowrap">
+              <span>P</span>
+              <span class="bg-black/30 px-1 rounded">${pk.available}</span>
+            </div>
+          `,
+          iconSize: [44, 24],
+          iconAnchor: [22, 12]
+        });
+
+        const popupHtml = `
+          <div class="p-1 min-w-[190px]">
+            <div class="text-[10px] font-bold text-indigo-300 mb-0.5">🅿️ 即時停車資訊</div>
+            <div class="text-xs font-bold text-white mb-2">${pk.name}</div>
+            <div class="flex items-center justify-between bg-white/5 rounded-xl p-2 mb-1.5">
+              <div>
+                <div class="text-[10px] text-slate-400">剩餘空位</div>
+                <div class="text-base font-extrabold ${isLow ? 'text-rose-400' : 'text-emerald-400'}">${pk.available} <span class="text-[10px] text-slate-400 font-normal">/ ${pk.total}</span></div>
+              </div>
+              <div class="text-right">
+                <div class="text-[10px] text-slate-400">費率</div>
+                <div class="text-xs font-semibold text-white">${pk.rate}</div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        L.marker([pk.lat, pk.lng], { icon }).bindPopup(popupHtml).addTo(layers.parking);
+      });
+    }
+
+    // =========================================================================
+    // 6. TDX 全台官方路況資料載入（不再使用隨機模擬車速）
+    // =========================================================================
+    let autoSimTimer = null;
+    let trafficLoading = false;
+
+    function updateClockLabel(value) {
+      const date = value ? new Date(value) : new Date();
+      document.getElementById('last-update-time').textContent =
+        Number.isNaN(date.getTime()) ? '資料時間未知' :
+        date.toLocaleTimeString('zh-TW', { hour12: false });
+    }
+
+    async function loadTdxTrafficData(manual = false) {
+      if (trafficLoading) return;
+      trafficLoading = true;
+      const dot = document.getElementById('live-dot');
+      try {
+        const response = await fetch('./data/tdx-traffic.json?ts=' + Date.now(), { cache: 'no-store' });
+        if (!response.ok) throw new Error('官方路況資料尚未發布（HTTP ' + response.status + '）');
+        const payload = await response.json();
+        if (!payload || !Array.isArray(payload.segments)) throw new Error('TDX 路況資料格式不正確');
+        roadSegments = normalizeTrafficSegments(payload.segments, payload.generatedAt);
+        renderTrafficNetwork();
+        updateClockLabel(payload.generatedAt);
+        dot.classList.add('bg-emerald-400');
+        dot.classList.remove('bg-slate-500', 'bg-rose-500');
+        if (manual) {
+          const staleCount = roadSegments.filter(seg => seg._stale).length;
+          const invalidZeroCount = roadSegments.filter(seg => !seg._speedValid && !seg._stale).length;
+          showToast(`已載入 ${roadSegments.length} 筆路段（過期 ${staleCount}、0 車速待確認 ${invalidZeroCount}）`);
+        }
+        if (!roadSegments.length) showToast('目前沒有可顯示的官方路段資料，請稍後重試');
+      } catch (error) {
+        dot.classList.remove('bg-emerald-400');
+        dot.classList.add('bg-rose-500');
+        if (manual) showToast('路況資料載入失敗：' + error.message);
+        console.error('[TDX traffic]', error);
+      } finally {
+        trafficLoading = false;
+      }
+    }
+
+    function simulateTrafficUpdate(manual = false) {
+      // 保留既有刷新按鈕介面，實際改為重新讀取官方資料。
+      loadTdxTrafficData(manual);
+    }
+
+    function toggleAutoSimulation(enabled) {
+      const dot = document.getElementById('live-dot');
+      if (autoSimTimer) clearInterval(autoSimTimer);
+      if (enabled) {
+        dot.classList.add('animate-pulse', 'bg-emerald-400');
+        dot.classList.remove('bg-slate-500');
+        autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
+        showToast('已開啟官方路況資料自動更新檢查');
+      } else {
+        dot.classList.remove('animate-pulse', 'bg-emerald-400');
+        dot.classList.add('bg-slate-500');
+        showToast('已暫停自動更新檢查');
+      }
+    }
+
+    // =========================================================================
+    // 7. 互動控制：圖層切換、底圖切換、城市跳轉與搜尋
+    // =========================================================================
+    function toggleLayerPanel() {
+      const panel = document.getElementById('layer-panel');
+      panel.classList.toggle('hidden');
+    }
+
+    function toggleMapLayer(layerKey, visible) {
+      if (visible) {
+        map.addLayer(layers[layerKey]);
+      } else {
+        map.removeLayer(layers[layerKey]);
+      }
+      // 更新啟用圖層計數徽章
+      const count = ['chk-traffic', 'chk-incidents', 'chk-cctv', 'chk-parking']
+        .filter(id => document.getElementById(id).checked).length;
+      document.getElementById('active-layer-badge').textContent = count;
+    }
+
+    function switchBaseMap(type) {
+      if (!baseLayers[type]) return;
+      Object.values(baseLayers).forEach(layer => {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+      });
+      baseLayers[type].addTo(map);
+      currentBaseMap = type;
+
+      ['dark', 'light', 'satellite'].forEach(key => {
+        const btn = document.getElementById(`base-${key}`);
+        if (!btn) return;
+        btn.className = key === type
+          ? 'base-btn py-1.5 px-2 rounded-xl bg-sky-500 text-white text-center transition'
+          : 'base-btn py-1.5 px-2 rounded-xl bg-white/10 hover:bg-white/20 text-center transition';
+      });
+
+      document.querySelectorAll('.glass-panel, .glass-panel-light').forEach(panel => {
+        panel.classList.toggle('glass-panel-light', type === 'light');
+        panel.classList.toggle('glass-panel', type !== 'light');
+      });
+      const selector = document.getElementById('region-select');
+      if (selector) {
+        selector.style.color = type === 'light' ? '#0f172a' : '#f8fafc';
+        selector.style.backgroundColor = type === 'light' ? 'rgba(255,255,255,.92)' : 'rgba(15,23,42,.92)';
+      }
+    }
+
+    const regions = {
+      taiwan: { center: [23.7500, 120.9500], zoom: 7, label: '全台灣道路總覽' },
+      taipei: { center: [25.0375, 121.5637], zoom: 12, label: '臺北市' },
+      newtaipei: { center: [25.0169, 121.4628], zoom: 10, label: '新北市' },
+      keelung: { center: [25.1276, 121.7392], zoom: 12, label: '基隆市' },
+      taoyuan: { center: [24.9937, 121.3009], zoom: 11, label: '桃園市' },
+      hsinchu_city: { center: [24.8017, 120.9714], zoom: 13, label: '新竹市' },
+      hsinchu_county: { center: [24.7033, 121.1252], zoom: 10, label: '新竹縣' },
+      yilan: { center: [24.7021, 121.7378], zoom: 10, label: '宜蘭縣' },
+      taichung: { center: [24.1477, 120.6736], zoom: 11, label: '臺中市' },
+      miaoli: { center: [24.5602, 120.8214], zoom: 10, label: '苗栗縣' },
+      changhua: { center: [24.0518, 120.5161], zoom: 10, label: '彰化縣' },
+      nantou: { center: [23.9609, 120.9719], zoom: 10, label: '南投縣' },
+      yunlin: { center: [23.7092, 120.4313], zoom: 10, label: '雲林縣' },
+      chiayi_city: { center: [23.4801, 120.4491], zoom: 13, label: '嘉義市' },
+      chiayi_county: { center: [23.4589, 120.2930], zoom: 10, label: '嘉義縣' },
+      tainan: { center: [22.9999, 120.2269], zoom: 11, label: '臺南市' },
+      kaohsiung: { center: [22.6273, 120.3014], zoom: 11, label: '高雄市' },
+      pingtung: { center: [22.5519, 120.5487], zoom: 10, label: '屏東縣' },
+      hualien: { center: [23.9872, 121.6015], zoom: 10, label: '花蓮縣' },
+      taitung: { center: [22.7583, 121.1444], zoom: 10, label: '臺東縣' },
+      penghu: { center: [23.5711, 119.5793], zoom: 11, label: '澎湖縣' },
+      kinmen: { center: [24.4408, 118.3183], zoom: 11, label: '金門縣' },
+      lienchiang: { center: [26.1605, 119.9517], zoom: 11, label: '連江縣' }
+    };
+
+    function flyToRegion(key) {
+      const target = regions[key];
+      if (!target) return;
+      map.flyTo(target.center, target.zoom, { duration: 1.1 });
+      const selector = document.getElementById('region-select');
+      if (selector && selector.value !== key) selector.value = key;
+      document.querySelectorAll('.region-btn').forEach(btn => {
+        const active = btn.dataset.region === key;
+        btn.classList.toggle('active-region', active);
+        if (active) {
+          btn.classList.add('bg-sky-500', 'text-white', 'shadow-lg', 'shadow-sky-500/30');
+          btn.classList.remove('glass-panel', 'glass-panel-light');
+        } else {
+          btn.classList.remove('bg-sky-500', 'text-white', 'shadow-lg', 'shadow-sky-500/30');
+          btn.classList.add(currentBaseMap === 'light' ? 'glass-panel-light' : 'glass-panel');
+        }
+      });
+    }
+
+    // 搜尋功能
+    const searchInput = document.getElementById('road-search-input');
+    const searchResults = document.getElementById('search-results');
+    const clearSearchBtn = document.getElementById('clear-search-btn');
+
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      clearSearchBtn.classList.toggle('hidden', q.length === 0);
+
+      if (!q) {
+        searchResults.classList.add('hidden');
+        return;
+      }
+
+      const matches = [];
+      roadSegments.forEach(s => {
+        if (s.name.toLowerCase().includes(q)) {
+          const mid = s.coords[Math.floor(s.coords.length / 2)];
+          matches.push({ title: s.name, sub: `即時車速 ${s.speed} km/h`, lat: mid[0], lng: mid[1], zoom: 15, tag: '路段' });
+        }
+      });
+      incidentsData.forEach(inc => {
+        if (inc.title.toLowerCase().includes(q) || inc.desc.toLowerCase().includes(q)) {
+          matches.push({ title: inc.title, sub: inc.lane, lat: inc.lat, lng: inc.lng, zoom: 16, tag: '事件' });
+        }
+      });
+      cctvData.forEach(cam => {
+        if (cam.name.toLowerCase().includes(q)) {
+          matches.push({ title: cam.name, sub: cam.flow, lat: cam.lat, lng: cam.lng, zoom: 16, tag: 'CCTV' });
+        }
+      });
+
+      if (matches.length === 0) {
+        searchResults.innerHTML = `<div class="p-2.5 text-slate-400 text-center">找不到符合「${e.target.value}」的路段或事件</div>`;
+      } else {
+        searchResults.innerHTML = matches.map(m => `
+          <button onclick="selectSearchResult(${m.lat}, ${m.lng}, ${m.zoom})" class="w-full text-left p-2 rounded-xl hover:bg-white/10 flex items-center justify-between gap-2 transition">
+            <div class="min-w-0">
+              <div class="font-medium truncate">${m.title}</div>
+              <div class="text-[10px] text-slate-400 truncate">${m.sub}</div>
+            </div>
+            <span class="px-1.5 py-0.5 text-[10px] rounded bg-sky-500/20 text-sky-300 shrink-0">${m.tag}</span>
+          </button>
+        `).join('');
+      }
+      searchResults.classList.remove('hidden');
+    });
+
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      clearSearchBtn.classList.add('hidden');
+      searchResults.classList.add('hidden');
+    });
+
+    function selectSearchResult(lat, lng, zoom) {
+      map.flyTo([lat, lng], zoom, { duration: 1 });
+      searchResults.classList.add('hidden');
+    }
+
+    // 定位使用者位置
+    let userLocationMarker = null;
+    function locateUser() {
+      if (!navigator.geolocation) {
+        showToast('您的瀏覽器不支援地理定位功能');
+        return;
+      }
+      showToast('正在取得您的目前位置...');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          map.flyTo([latitude, longitude], 15, { duration: 1.2 });
+
+          if (userLocationMarker) map.removeLayer(userLocationMarker);
+          const userIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `
+              <div class="relative flex items-center justify-center w-6 h-6">
+                <span class="marker-pulse absolute inset-0 rounded-full bg-sky-400"></span>
+                <span class="relative w-3.5 h-3.5 rounded-full bg-sky-500 border-2 border-white shadow"></span>
+              </div>
+            `,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          });
+          userLocationMarker = L.marker([latitude, longitude], { icon: userIcon })
+            .bindPopup('<div class="text-xs font-bold p-1">📍 您的目前位置</div>')
+            .addTo(map);
+          showToast('已定位至您的目前位置');
+        },
+        () => {
+          // 若未授權定位，平滑導回高雄三民區預設中心
+          flyToRegion('kaohsiung');
+          showToast('無法取得 GPS 權限，已為您聚焦高雄市三民區');
+        },
+        { timeout: 6000 }
+      );
+    }
+
+    // =========================================================================
+    // 8. 模擬通報新路況功能
+    // =========================================================================
+    let isReportMode = false;
+    let pendingReportLatLng = null;
+
+    function toggleReportMode(forceState) {
+      isReportMode = typeof forceState === 'boolean' ? forceState : !isReportMode;
+      const banner = document.getElementById('report-banner');
+      const mapEl = document.getElementById('map');
+
+      if (isReportMode) {
+        banner.classList.remove('hidden');
+        mapEl.style.cursor = 'crosshair';
+        // 手機版自動收合圖層面板避免遮擋
+        if (window.innerWidth < 640) {
+          document.getElementById('layer-panel').classList.add('hidden');
+        }
+      } else {
+        banner.classList.add('hidden');
+        mapEl.style.cursor = '';
+      }
+    }
+
+    map.on('click', (e) => {
+      if (!isReportMode) return;
+      pendingReportLatLng = e.latlng;
+      document.getElementById('report-coords-label').textContent =
+        `座標：${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+      document.getElementById('report-modal').classList.remove('hidden');
+      toggleReportMode(false);
+    });
+
+    function closeReportModal() {
+      document.getElementById('report-modal').classList.add('hidden');
+      pendingReportLatLng = null;
+    }
+
+    function submitNewReport() {
+      if (!pendingReportLatLng) return;
+      const type = document.getElementById('report-type').value;
+      const titleInput = document.getElementById('report-title').value.trim();
+      const descInput = document.getElementById('report-desc').value.trim();
+
+      const newIncident = {
+        id: 'inc-' + Date.now(),
+        type,
+        title: titleInput || '民眾回報即時路況事件',
+        desc: descInput || '現場車流放慢，請用路人小心駕駛並注意前方車況。',
+        time: '剛剛通報',
+        lane: '現場警戒中',
+        lat: pendingReportLatLng.lat,
+        lng: pendingReportLatLng.lng
+      };
+
+      incidentsData.push(newIncident);
+      document.getElementById('chk-incidents').checked = true;
+      toggleMapLayer('incidents', true);
+      renderIncidents();
+
+      // 清空表單並關閉
+      document.getElementById('report-title').value = '';
+      document.getElementById('report-desc').value = '';
+      closeReportModal();
+      showToast('✅ 感謝回報！新路況標記已同步至地圖');
+    }
+
+    // 輕量提示框
+    let toastTimeout = null;
+    function showToast(text) {
+      const toast = document.getElementById('toast-msg');
+      toast.firstElementChild.textContent = text;
+      toast.classList.remove('opacity-0');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.add('opacity-0');
+      }, 2800);
+    }
+
+    // =========================================================================
+    // 9. 啟動初始化
+    // =========================================================================
+    window.addEventListener('load', () => {
+      renderTrafficNetwork();
+      renderIncidents();
+      renderCCTV();
+      renderParking();
+      updateClockLabel();
+      loadTdxTrafficData(false);
+      autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
+      // iPhone Safari 首屏尺寸穩定後重新計算 Leaflet 地圖尺寸
+      requestAnimationFrame(() => map.invalidateSize(true));
+    });
+  </script>
+</body>
+</html>
