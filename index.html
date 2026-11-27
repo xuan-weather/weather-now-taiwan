@@ -662,6 +662,9 @@
       if (seg._stale) {
         return { color: '#94a3b8', label: '資料過期', badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40' };
       }
+      if (!Number.isFinite(seg._trafficTimestamp)) {
+        return { color: '#94a3b8', label: '觀測時間待確認', badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40' };
+      }
       if (!seg._speedValid) {
         return { color: '#94a3b8', label: '車速待確認', badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40' };
       }
@@ -922,8 +925,8 @@
         if (manual) {
           const staleCount = roadSegments.filter(seg => seg._stale).length;
           const timeUnknownCount = roadSegments.filter(seg => !seg._stale && !Number.isFinite(seg._trafficTimestamp)).length;
-          const validCount = roadSegments.filter(seg => !seg._stale && seg._speedValid).length;
-          const pendingLevelCount = roadSegments.filter(seg => !seg._stale && seg._speedValid && seg._congestionLevel === null).length;
+          const validCount = roadSegments.filter(seg => !seg._stale && Number.isFinite(seg._trafficTimestamp) && seg._speedValid).length;
+          const pendingLevelCount = roadSegments.filter(seg => !seg._stale && Number.isFinite(seg._trafficTimestamp) && seg._speedValid && seg._congestionLevel === null).length;
           showToast(`路況 ${roadSegments.length.toLocaleString('zh-TW')} 筆｜有效車速 ${validCount.toLocaleString('zh-TW')}\n分級待補 ${pendingLevelCount}｜時間待確認 ${timeUnknownCount}｜過期 ${staleCount}`);
         }
         if (!roadSegments.length) showToast('目前沒有可顯示的官方路段資料，請稍後重試');
