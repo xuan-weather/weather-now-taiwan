@@ -771,30 +771,35 @@
       });
     }
 
-    async function loadSupplementalTrafficLayers() {
+    async function loadOneSupplementalLayer(file, key, assign, render) {
       try {
-        const response = await fetch('./data/tdx-layers.json?ts=' + Date.now(), { cache: 'no-store' });
-        if (!response.ok) throw new Error('官方即時資訊資料尚未更新');
+        const response = await fetch('./data/' + file + '?ts=' + Date.now(), { cache: 'no-store' });
+        if (!response.ok) throw new Error(file + ' HTTP ' + response.status);
         const payload = await response.json();
-        incidentsData = Array.isArray(payload.incidents) ? payload.incidents : [];
-        cctvData = Array.isArray(payload.cctv) ? payload.cctv : [];
-        parkingData = Array.isArray(payload.parking) ? payload.parking : [];
-        renderIncidents();
-        renderCCTV();
-        renderParking();
-        const counts = `事故/施工 ${incidentsData.length} · CCTV ${cctvData.length} · 停車場 ${parkingData.length}`;
-        console.info('[TDX supplementary layers]', counts, payload.sources || []);
-        const updated = document.getElementById('last-update-time');
-        if (updated && payload.generatedAt) updated.title = '即時資訊圖層更新：' + payload.generatedAt;
+        // A failed/empty source must never erase the last valid map snapshot.
+        if (payload.ok !== true || !Array.isArray(payload[key])) {
+          console.warn('[TDX layer retained previous data]', file, payload.sources || payload.error || '');
+          return;
+        }
+        assign(payload[key]);
+        render();
+        console.info('[TDX layer loaded]', file, payload[key].length, payload.generatedAt);
       } catch (error) {
-        console.warn('[TDX supplementary layers]', error);
-        incidentsData = [];
-        cctvData = [];
-        parkingData = [];
-        renderIncidents();
-        renderCCTV();
-        renderParking();
+        console.warn('[TDX layer unavailable; retaining current data]', file, error);
       }
+    }
+
+    async function loadSupplementalTrafficLayers() {
+      // Each map layer has its own JSON and request. One endpoint failing cannot
+      // prevent the other two layers from being loaded and rendered.
+      await Promise.allSettled([
+        loadOneSupplementalLayer('tdx-incidents.json', 'incidents',
+          rows => { incidentsData = rows; }, renderIncidents),
+        loadOneSupplementalLayer('tdx-cctv.json', 'cctv',
+          rows => { cctvData = rows; }, renderCCTV),
+        loadOneSupplementalLayer('tdx-parking.json', 'parking',
+          rows => { parkingData = rows; }, renderParking)
+      ]);
     }
 
     function renderParking() {
