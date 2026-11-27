@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fetch nationwide official live road sections from the MOTC TDX API."""
-import json, os, re, sys, time
+import gzip, json, os, re, sys, time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -16,7 +16,7 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 4.0
+MIN_REQUEST_INTERVAL = 8.0
 _last_request_at = 0.0
 CITIES = [
     ("Taipei","臺北市","taipei"),("NewTaipei","新北市","newtaipei"),
@@ -32,20 +32,35 @@ CITIES = [
     ("KinmenCounty","金門縣","kinmen"),("LienchiangCounty","連江縣","lienchiang")
 ]
 
+def decode_response(raw, headers=None):
+    # urllib 不會自動解壓 gzip；依標頭或 gzip magic bytes 判斷後再解析。
+    encoding = (headers.get("Content-Encoding", "") if headers else "").lower()
+    if encoding == "gzip" or raw[:2] == b"\\x1f\\x8b":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8-sig", "replace")
+
 def get_json(url, headers=None, body=None):
     global _last_request_at
-    req = Request(url, headers=headers or {}, data=body, method="POST" if body is not None else "GET")
+    request_headers = {"Accept": "application/json", "Accept-Encoding": "identity"}
+    request_headers.update(headers or {})
+    req = Request(url, headers=request_headers, data=body, method="POST" if body is not None else "GET")
     for attempt in range(6):
-        # TDX 依 API Key 方案限制呼叫頻率；所有端點共用節流，避免 22 縣市連續打爆。
+        # TDX API 共用節流；保守降低請求頻率，避免 429。
         elapsed = time.monotonic() - _last_request_at
         if elapsed < MIN_REQUEST_INTERVAL:
             time.sleep(MIN_REQUEST_INTERVAL - elapsed)
         try:
             with urlopen(req, timeout=60) as response:
                 _last_request_at = time.monotonic()
-                return json.loads(response.read().decode("utf-8-sig"))
+                raw = response.read()
+                return json.loads(decode_response(raw, response.headers))
         except HTTPError as exc:
             _last_request_at = time.monotonic()
+            raw_error = exc.read()
+            try:
+                detail = decode_response(raw_error, exc.headers)[:800]
+            except Exception:
+                detail = raw_error[:300].decode("utf-8", "replace")
             if exc.code == 429 and attempt < 5:
                 retry_after = exc.headers.get("Retry-After", "")
                 wait = None
@@ -58,12 +73,13 @@ def get_json(url, headers=None, body=None):
                         except Exception:
                             wait = None
                 if wait is None:
-                    wait = min(120, 20 * (2 ** attempt))
+                    wait = min(180, 30 * (2 ** attempt))
                 print(f"[RATE LIMIT] TDX HTTP 429; cooldown {wait}s before retry {attempt + 1}/5", file=sys.stderr)
                 time.sleep(wait)
                 continue
-            detail = exc.read().decode("utf-8", "replace")[:500]
             raise RuntimeError(f"HTTP {exc.code} for {url}: {detail}") from exc
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+            raise RuntimeError(f"Invalid TDX response for {url}: {type(exc).__name__}: {exc}") from exc
 
 def token():
     body = urlencode({"grant_type":"client_credentials","client_id":CLIENT_ID,"client_secret":CLIENT_SECRET}).encode()
@@ -101,7 +117,7 @@ def rows(path, bearer):
         payload = get_json(f"{API_ROOT}/{path}?{query}", {
             "Authorization":f"Bearer {bearer}",
             "Accept":"application/json",
-            "Accept-Encoding":"gzip"
+            "Accept-Encoding":"identity"
         })
         batch = extract_items(payload)
         result.extend(batch)
@@ -211,7 +227,6 @@ def main():
         except Exception as exc:
             stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
-        time.sleep(1.2)
     if not all_segments:
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
     payload={

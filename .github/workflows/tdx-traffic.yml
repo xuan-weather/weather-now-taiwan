@@ -8,16 +8,16 @@ on:
       - "scripts/fetch_tdx_traffic.py"
       - ".github/workflows/tdx-traffic.yml"
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/20 * * * *"
 permissions:
   contents: write
 concurrency:
   group: tdx-traffic-data
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   update-traffic:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
