@@ -671,9 +671,26 @@ def main():
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
     save_shape_cache(shape_cache)
     save_congestion_cache(level_cache)
+    generated_at = datetime.now(TW)
+    # 以各路段來源提供的觀測時間計算最新官方資料時間；
+    # generatedAt 則保留為本次 JSON 快照產生時間，兩者不可混用。
+    observed_times = []
+    for segment in all_segments:
+        raw_time = segment.get("updateTime")
+        if not raw_time:
+            continue
+        try:
+            parsed_time = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            if parsed_time.tzinfo is None:
+                parsed_time = parsed_time.replace(tzinfo=TW)
+            observed_times.append(parsed_time.astimezone(TW))
+        except (TypeError, ValueError):
+            continue
+    official_data_at = max(observed_times).isoformat(timespec="seconds") if observed_times else None
     payload={
         "source":"交通部 TDX 路況資訊 v2",
-        "generatedAt":datetime.now(TW).isoformat(timespec="seconds"),
+        "generatedAt":generated_at.isoformat(timespec="seconds"),
+        "officialDataAt":official_data_at,
         "totalSegments":len(all_segments),
         "segments":all_segments,
         "sources":stats
