@@ -105,7 +105,7 @@ def extract_items(payload):
         error = payload.get("error") or {}
         raise RuntimeError(f"TDX returned {error.get('message') or error or 'success=false'}")
     # TDX 路況資料常以 LiveTrafficList/LiveTraffic、SectionShapeList/SectionShapes 包裝。
-    preferred = ("LiveTraffic", "SectionShape", "LiveTraffics", "SectionShapes", "value", "data", "Data")
+    preferred = ("LiveTraffic", "LiveEvent", "RoadEvent", "CCTV", "ParkingAvailability", "ParkingLot", "SectionShape", "LiveTraffics", "LiveEvents", "RoadEventList", "CCTVList", "ParkingAvailabilityList", "ParkingLotList", "SectionShapes", "value", "data", "Data")
     for key in preferred:
         if key in payload:
             found = extract_items(payload[key])
@@ -385,8 +385,232 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
         })
     return output
 
+
+# Supplementary nationwide layers: road events, CCTV inventory, and parking availability.
+SUPPLEMENTAL_PATH = "data/tdx-layers.json"
+SUPPLEMENTAL_CACHE_PATH = "data/tdx-layers-cache.json"
+SUPPLEMENTAL_CACHE_TTL = 7 * 24 * 60 * 60
+SUPPLEMENTAL_CITIES = [
+    ("Taipei","臺北市"),("NewTaipei","新北市"),("Keelung","基隆市"),
+    ("Taoyuan","桃園市"),("Hsinchu","新竹市"),("HsinchuCounty","新竹縣"),
+    ("MiaoliCounty","苗栗縣"),("Taichung","臺中市"),("ChanghuaCounty","彰化縣"),
+    ("NantouCounty","南投縣"),("YunlinCounty","雲林縣"),("Chiayi","嘉義市"),
+    ("ChiayiCounty","嘉義縣"),("Tainan","臺南市"),("Kaohsiung","高雄市"),
+    ("PingtungCounty","屏東縣"),("YilanCounty","宜蘭縣"),("HualienCounty","花蓮縣"),
+    ("TaitungCounty","臺東縣"),("PenghuCounty","澎湖縣"),("KinmenCounty","金門縣"),
+    ("LienchiangCounty","連江縣")
+]
+
+def load_supplemental_cache():
+    try:
+        with open(SUPPLEMENTAL_CACHE_PATH,"r",encoding="utf-8") as f:
+            data=json.load(f)
+        return data if isinstance(data,dict) else {}
+    except (OSError,json.JSONDecodeError):
+        return {}
+
+def save_supplemental_cache(cache):
+    os.makedirs("data",exist_ok=True)
+    with open(SUPPLEMENTAL_CACHE_PATH,"w",encoding="utf-8") as f:
+        json.dump(cache,f,ensure_ascii=False,separators=(",",":"))
+
+def cached_static_rows(path,bearer,cache):
+    entry=cache.get(path)
+    now=datetime.now(timezone.utc)
+    if isinstance(entry,dict) and isinstance(entry.get("rows"),list):
+        try:
+            fetched=datetime.fromisoformat(entry.get("fetchedAt","").replace("Z","+00:00"))
+            if 0 <= (now-fetched).total_seconds() < SUPPLEMENTAL_CACHE_TTL:
+                return entry["rows"]
+        except (TypeError,ValueError):
+            pass
+    try:
+        fresh=rows(path,bearer)
+        cache[path]={"fetchedAt":now.isoformat(timespec="seconds"),"rows":fresh}
+        print(f"[LAYER CACHE] {path}: refreshed {len(fresh)}")
+        return fresh
+    except Exception as exc:
+        if isinstance(entry,dict) and isinstance(entry.get("rows"),list):
+            print(f"[LAYER CACHE WARN] {path}: reuse saved data ({exc})",file=sys.stderr)
+            return entry["rows"]
+        raise
+
+def field_value(item,*keys):
+    for key in keys:
+        value=item.get(key)
+        if value is not None and str(value).strip() not in ("","None"):
+            return value
+    return None
+
+def coordinates(item):
+    pos=item.get("Position") or item.get("position") or {}
+    lat=field_value(item,"PositionLat","Latitude","lat","Lat")
+    lon=field_value(item,"PositionLon","Longitude","lon","Lon","Lng")
+    if lat is None and isinstance(pos,dict):
+        lat=field_value(pos,"PositionLat","Latitude","lat","Lat")
+        lon=field_value(pos,"PositionLon","Longitude","lon","Lon","Lng")
+    try:
+        lat=float(lat); lon=float(lon)
+        if 20 <= lat <= 27 and 118 <= lon <= 123:
+            return lat,lon
+    except (TypeError,ValueError):
+        pass
+    return None
+
+def parse_event_point(item):
+    raw=field_value(item,"Positions","Position","Geometry","WKT")
+    if isinstance(raw,dict):
+        return coordinates({"Position":raw})
+    if isinstance(raw,str):
+        match=re.search(r"POINT\\s*\\(\\s*([-\\d.]+)\\s+([-\\d.]+)",raw,re.I)
+        if match:
+            lon,lat=float(match.group(1)),float(match.group(2))
+            if 20 <= lat <= 27 and 118 <= lon <= 123:
+                return lat,lon
+    return coordinates(item)
+
+def fetch_event_records(bearer,authority):
+    url=f"https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/{authority}"
+    query=urlencode({"$format":"JSON","$top":1000})
+    payload=get_json(f"{url}?{query}",{"Authorization":f"Bearer {bearer}","Accept":"application/json","Accept-Encoding":"gzip"})
+    items=extract_items(payload)
+    output=[]
+    for item in items:
+        if not isinstance(item,dict):
+            continue
+        point=parse_event_point(item)
+        if not point:
+            continue
+        location=item.get("Location") or {}
+        impact=item.get("Impact") or {}
+        loc_text=""
+        if isinstance(location,dict):
+            loc_text=field_value(location,"Description","RoadName","Road","LocationDescription") or ""
+            if not loc_text:
+                for v in location.values():
+                    if isinstance(v,dict):
+                        loc_text=field_value(v,"Road","RoadName","Description") or loc_text
+        description=field_value(impact,"Description") if isinstance(impact,dict) else None
+        title=field_value(item,"Description","EventTitle","EventType","Title") or "道路事件"
+        output.append({
+            "id":str(field_value(item,"EventID","EventId","ID") or f"{authority}-{len(output)}"),
+            "type":str(field_value(item,"EventType","EventTypeCode","EventCategory") or "incident"),
+            "title":str(title),
+            "desc":str(description or field_value(item,"Comment","Remark","Description") or ""),
+            "time":str(field_value(item,"PublishTime","EffectiveTime","UpdateTime") or ""),
+            "lane":str(field_value(item,"ImpactDescription","Direction","RoadDirection") or ""),
+            "road":str(loc_text),
+            "lat":point[0],"lng":point[1],"authority":authority,
+            "source":"TDX RoadEvent"
+        })
+    return output
+
+def fetch_supplemental_layers(bearer):
+    cache=load_supplemental_cache()
+    now=datetime.now(TW).isoformat(timespec="seconds")
+    cameras={}
+    parking={}
+    incidents=[]
+    source_status=[]
+
+    # CCTV inventory is static metadata; refresh weekly. Live image URLs remain source links.
+    for path in ("Road/Traffic/CCTV/Highway","Road/Traffic/CCTV/Freeway"):
+        try:
+            for item in cached_static_rows(path,bearer,cache):
+                point=coordinates(item)
+                if not point: continue
+                cam_id=field_value(item,"CCTVID","CameraID","DeviceID","ID")
+                stream=field_value(item,"VideoStreamURL","VideoURL","StreamURL")
+                image=field_value(item,"VideoImageURL","ImageURL","SnapshotURL")
+                name=field_value(item,"RoadName","LocationDescription","CCTVName","Description") or f"{path.split('/')[-1]} CCTV"
+                key=str(cam_id or f"{path}-{point[0]}-{point[1]}")
+                cameras[key]={"id":key,"name":str(name),"direction":str(field_value(item,"Direction","RoadDirection") or ""),
+                              "lat":point[0],"lng":point[1],"streamUrl":stream,"imageUrl":image,
+                              "source":"TDX","updatedAt":field_value(item,"UpdateTime","SrcUpdateTime")}
+            source_status.append({"source":path,"ok":True,"count":len(cameras)})
+        except Exception as exc:
+            source_status.append({"source":path,"ok":False,"error":str(exc)[:180]})
+            print(f"[LAYER WARN] {path}: {exc}",file=sys.stderr)
+
+    for city,label in SUPPLEMENTAL_CITIES:
+        path=f"Road/Traffic/CCTV/City/{city}"
+        try:
+            for item in cached_static_rows(path,bearer,cache):
+                point=coordinates(item)
+                if not point: continue
+                cam_id=field_value(item,"CCTVID","CameraID","DeviceID","ID")
+                key=str(cam_id or f"{city}-{point[0]}-{point[1]}")
+                cameras[key]={"id":key,"name":str(field_value(item,"RoadName","LocationDescription","CCTVName","Description") or f"{label}道路監視器"),
+                              "direction":str(field_value(item,"Direction","RoadDirection") or ""),
+                              "lat":point[0],"lng":point[1],
+                              "streamUrl":field_value(item,"VideoStreamURL","VideoURL","StreamURL"),
+                              "imageUrl":field_value(item,"VideoImageURL","ImageURL","SnapshotURL"),
+                              "source":"TDX","updatedAt":field_value(item,"UpdateTime","SrcUpdateTime"),"region":label}
+            source_status.append({"source":f"CCTV {label}","ok":True})
+        except Exception as exc:
+            source_status.append({"source":f"CCTV {label}","ok":False,"error":str(exc)[:180]})
+            print(f"[LAYER WARN] CCTV {label}: {exc}",file=sys.stderr)
+
+    # Parking availability is refreshed each run; lot coordinates/name are joined by ParkingID.
+    for city,label in SUPPLEMENTAL_CITIES:
+        try:
+            lots=rows(f"Parking/OffStreet/ParkingLot/City/{city}",bearer)
+            availability=rows(f"Parking/OffStreet/ParkingAvailability/City/{city}",bearer)
+            lot_by_id={}
+            for lot in lots:
+                pid=str(field_value(lot,"ParkingID","ParkingId","ID") or "")
+                point=coordinates(lot)
+                if pid and point: lot_by_id[pid]=(lot,point)
+            mapped=0
+            for avail in availability:
+                pid=str(field_value(avail,"ParkingID","ParkingId","ID") or "")
+                if pid not in lot_by_id: continue
+                lot,point=lot_by_id[pid]
+                available=field_value(avail,"AvailableCar","AvailableSmallCar","AvailableCarCount","AvailableNumber")
+                total=field_value(lot,"TotalCar","TotalSpaces","TotalParkingSpaces")
+                try:
+                    available=int(float(available))
+                    if available < 0: continue
+                except (TypeError,ValueError):
+                    continue
+                try: total=int(float(total)) if total is not None else None
+                except (TypeError,ValueError): total=None
+                parking[pid]={"id":pid,"name":str(field_value(lot,"ParkingName","Name") or f"{label}停車場"),
+                              "available":available,"total":total,"rate":str(field_value(lot,"FareDescription","ChargeDescription","ParkingRate") or ""),
+                              "lat":point[0],"lng":point[1],"region":label,
+                              "updatedAt":field_value(avail,"UpdateTime","SrcUpdateTime","DataCollectTime"),
+                              "source":"TDX"}
+                mapped+=1
+            source_status.append({"source":f"Parking {label}","ok":True,"count":mapped})
+            print(f"[LAYER] Parking {label}: lots={len(lots)} availability={len(availability)} mapped={mapped}")
+        except Exception as exc:
+            source_status.append({"source":f"Parking {label}","ok":False,"error":str(exc)[:180]})
+            print(f"[LAYER WARN] Parking {label}: {exc}",file=sys.stderr)
+
+    # Road-event live endpoints are documented for national highways; do not invent city events.
+    for authority in ("Freeway","Highway"):
+        try:
+            found=fetch_event_records(bearer,authority)
+            incidents.extend(found)
+            source_status.append({"source":f"RoadEvent {authority}","ok":True,"count":len(found)})
+            print(f"[LAYER] RoadEvent {authority}: {len(found)}")
+        except Exception as exc:
+            source_status.append({"source":f"RoadEvent {authority}","ok":False,"error":str(exc)[:180]})
+            print(f"[LAYER WARN] RoadEvent {authority}: {exc}",file=sys.stderr)
+
+    cache["generatedAt"]=now
+    save_supplemental_cache(cache)
+    payload={"source":"交通部 TDX 官方道路事件、CCTV 與停車資訊","generatedAt":now,
+             "incidents":incidents,"cctv":list(cameras.values()),"parking":list(parking.values()),
+             "sources":source_status}
+    os.makedirs("data",exist_ok=True)
+    with open(SUPPLEMENTAL_PATH,"w",encoding="utf-8") as f:
+        json.dump(payload,f,ensure_ascii=False,separators=(",",":"))
+    print(f"[LAYER] saved incidents={len(incidents)} CCTV={len(cameras)} parking={len(parking)}")
+
 def main():
     bearer=token()
+    fetch_supplemental_layers(bearer)
     all_segments=[]
     stats=[]
     shape_cache = load_shape_cache()
