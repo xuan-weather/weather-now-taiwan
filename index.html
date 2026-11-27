@@ -965,11 +965,15 @@
         : date.toLocaleTimeString('zh-TW', { hour12: false });
     }
 
+    function updateCheckClockLabel() {
+      document.getElementById('last-check-time').textContent =
+        new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    }
+
     function updateClockLabel(officialValue) {
       document.getElementById('last-update-time').textContent =
         formatTrafficClock(officialValue);
-      document.getElementById('last-check-time').textContent =
-        new Date().toLocaleTimeString('zh-TW', { hour12: false });
+      updateCheckClockLabel();
     }
 
     async function loadTdxTrafficData(manual = false) {
@@ -987,7 +991,7 @@
 
         // CDN 或部署延遲若送回較舊 JSON，不覆蓋目前已載入的較新資料。
         if (snapshotTime < lastAcceptedTrafficGeneratedAt) {
-          updateClockLabel(payload.officialDataAt || payload.generatedAt);
+          updateCheckClockLabel();
           console.warn('[TDX traffic] ignored older snapshot', payload.generatedAt);
           if (manual) showToast('收到較舊的路況快照，已保留目前較新的資料');
           return;
