@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths:
-      - "index.html"
       - "scripts/fetch_tdx_traffic.py"
       - ".github/workflows/tdx-traffic.yml"
   schedule:
