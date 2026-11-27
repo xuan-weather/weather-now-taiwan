@@ -16,7 +16,7 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 1.0  # 每個 API 請求間隔 1 秒；429 仍依 Retry-After 自動退避
+MIN_REQUEST_INTERVAL = 12.0  # 降低 429；線型資料另做 7 天快取，減少重複 API 請求
 _last_request_at = 0.0
 
 # TDX 各路況端點的 City enum 不相同，依錯誤回應列出的清單分開設定。
@@ -53,7 +53,7 @@ def get_json(url, headers=None, body=None):
     request_headers.update(headers or {})
     req = Request(url, headers=request_headers, data=body, method="POST" if body is not None else "GET")
     for attempt in range(6):
-        # TDX API 共用節流；一般請求間隔 1 秒，遇到 429 仍依 Retry-After／退避策略等待。
+        # TDX API 共用節流；一般請求間隔 12 秒；遇到 429 嚴格依 Retry-After／退避策略等待。
         elapsed = time.monotonic() - _last_request_at
         if elapsed < MIN_REQUEST_INTERVAL:
             time.sleep(MIN_REQUEST_INTERVAL - elapsed)
@@ -133,6 +133,51 @@ def rows(path, bearer):
             return result
         skip += len(batch)
         time.sleep(0.6)
+
+SHAPE_CACHE_PATH = "data/tdx-shapes-cache.json"
+SHAPE_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+
+def load_shape_cache():
+    try:
+        with open(SHAPE_CACHE_PATH, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+        if isinstance(payload, dict) and isinstance(payload.get("shapes"), dict):
+            return payload
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"shapes": {}}
+
+def cached_shape_rows(path, bearer, cache):
+    entry = cache["shapes"].get(path)
+    now = datetime.now(timezone.utc)
+    if isinstance(entry, dict) and isinstance(entry.get("rows"), list):
+        try:
+            fetched = datetime.fromisoformat(entry.get("fetchedAt", "").replace("Z", "+00:00"))
+            age = (now - fetched).total_seconds()
+            if 0 <= age < SHAPE_CACHE_TTL_SECONDS:
+                print(f"[CACHE] {path}: reuse {len(entry['rows'])} shapes (age {int(age/3600)}h)")
+                return entry["rows"]
+        except (TypeError, ValueError):
+            pass
+    try:
+        fresh = rows(path, bearer)
+        cache["shapes"][path] = {
+            "fetchedAt": now.isoformat(timespec="seconds"),
+            "rows": fresh
+        }
+        print(f"[CACHE] {path}: refreshed {len(fresh)} shapes")
+        return fresh
+    except Exception:
+        if isinstance(entry, dict) and isinstance(entry.get("rows"), list) and entry["rows"]:
+            print(f"[CACHE WARN] {path}: API failed; fallback to saved geometry", file=sys.stderr)
+            return entry["rows"]
+        raise
+
+def save_shape_cache(cache):
+    os.makedirs("data", exist_ok=True)
+    cache["generatedAt"] = datetime.now(TW).isoformat(timespec="seconds")
+    with open(SHAPE_CACHE_PATH, "w", encoding="utf-8") as file:
+        json.dump(cache, file, ensure_ascii=False, separators=(",", ":"))
 
 def section_id(item):
     for key in ("SectionID","SectionId","sectionID","sectionId"):
@@ -218,12 +263,13 @@ def main():
     bearer=token()
     all_segments=[]
     stats=[]
-    # 市區即時車速與線型圖資各自使用支援的 City enum，只處理兩端點的交集。
+    shape_cache = load_shape_cache()
+    # 即時車速每輪重新抓取；相對固定的道路線型資料使用 7 天快取。
     for live_city, shape_city in CITY_PAIRS:
         city_code, label, region = live_city
         try:
             live = rows(f"Road/Traffic/Live/City/{city_code}", bearer)
-            shapes = rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer)
+            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer, shape_cache)
             segments = build_segments(live, shapes, region, label, "TDX 縣市即時路況")
             all_segments.extend(segments)
             stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
@@ -236,7 +282,7 @@ def main():
     for category, label, region in (("Highway","全台省道","highway"),("Freeway","全台國道","freeway")):
         try:
             live = rows(f"Road/Traffic/Live/{category}", bearer)
-            shapes = rows(f"Road/Traffic/SectionShape/{category}", bearer)
+            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/{category}", bearer, shape_cache)
             segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況")
             all_segments.extend(segments)
             stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
@@ -246,6 +292,7 @@ def main():
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
     if not all_segments:
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
+    save_shape_cache(shape_cache)
     payload={
         "source":"交通部 TDX 路況資訊 v2",
         "generatedAt":datetime.now(TW).isoformat(timespec="seconds"),
