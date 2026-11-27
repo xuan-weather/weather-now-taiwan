@@ -32,7 +32,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/tdx-traffic.json data/tdx-shapes-cache.json
+          git add data/tdx-traffic.json data/tdx-shapes-cache.json data/tdx-congestion-definitions.json
           if git diff --cached --quiet; then
             echo "No traffic data changes."
           else
