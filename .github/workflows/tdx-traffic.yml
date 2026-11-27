@@ -11,7 +11,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: tdx-traffic-data
+  group: tdx-api-global
   cancel-in-progress: false
 jobs:
   update-traffic:
