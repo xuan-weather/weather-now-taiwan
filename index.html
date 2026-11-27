@@ -513,110 +513,11 @@
     // =========================================================================
     // 3. 事故、施工、CCTV 監視器與停車場資料
     // =========================================================================
-    const incidentsData = [
-      {
-        id: 'inc-1',
-        type: 'accident',
-        title: '國道1號南下 366.5K (近九如交流道) 兩車追撞',
-        desc: '佔用外側車道與路肩，後方回堵約 2.5 公里，拖吊車已抵達現場處理中。',
-        time: '18:54 通報',
-        lane: '外側車道受阻',
-        lat: 22.6515,
-        lng: 120.3342
-      },
-      {
-        id: 'inc-2',
-        type: 'roadwork',
-        title: '九如一路與民族一路口 管線鋪面施工',
-        desc: '縮減為單線雙向通行，尖峰時段車流緩慢，請提前改道建國路或十全路。',
-        time: '預計 22:00 結束',
-        lane: '東向外側車道封閉',
-        lat: 22.6433,
-        lng: 120.3145
-      },
-      {
-        id: 'inc-3',
-        type: 'breakdown',
-        title: '鼎金系統交流道 國10轉國1南下匝道故障車',
-        desc: '一輛小貨車故障停靠匝道內側，警廣已通報國道警察前往警戒。',
-        time: '19:08 通報',
-        lane: '匝道內側受阻',
-        lat: 22.6768,
-        lng: 120.3272
-      },
-      {
-        id: 'inc-4',
-        type: 'accident',
-        title: '台北市建國高架北上 近忠孝東路匝道擦撞',
-        desc: '兩部自小客車擦撞，已移置路肩等待員警測繪，車流略為回堵。',
-        time: '19:02 通報',
-        lane: '路肩處理中',
-        lat: 25.0445,
-        lng: 121.5374
-      },
-      {
-        id: 'inc-5',
-        type: 'congestion',
-        title: '台中市臺灣大道三段 往市區方向下班車潮',
-        desc: '百貨商圈周邊車流量大，號誌週期調整中，平均時速約 20 km/h。',
-        time: '即時偵測',
-        lane: '全線車多壅塞',
-        lat: 24.1672,
-        lng: 120.6458
-      }
-    ];
+    let incidentsData = []; // 由 TDX 官方資料載入，不使用固定示範資料
 
-    const cctvData = [
-      {
-        id: 'cam-1',
-        name: '國道1號 鼎金系統交流道北側 (362K)',
-        direction: '南向視角',
-        flow: '車多壅塞 • 1,840 輛/時',
-        lat: 22.6752,
-        lng: 120.3282
-      },
-      {
-        id: 'cam-2',
-        name: '高雄市三民區 九如一路 / 國1交流道口',
-        direction: '西向視角',
-        flow: '嚴重壅塞 • 2,120 輛/時',
-        lat: 22.6431,
-        lng: 120.3348
-      },
-      {
-        id: 'cam-3',
-        name: '高雄市三民區 博愛一路 / 十全一路口',
-        direction: '北向視角',
-        flow: '車流順暢 • 1,150 輛/時',
-        lat: 22.6482,
-        lng: 120.3029
-      },
-      {
-        id: 'cam-4',
-        name: '國道1號 圓山交流道 (23K)',
-        direction: '北向視角',
-        flow: '車多緩慢 • 2,310 輛/時',
-        lat: 25.0735,
-        lng: 121.5315
-      },
-      {
-        id: 'cam-5',
-        name: '台中市 臺灣大道 / 惠中路口',
-        direction: '東向視角',
-        flow: '車多壅塞 • 1,960 輛/時',
-        lat: 24.1655,
-        lng: 120.6478
-      }
-    ];
+    let cctvData = []; // 由 TDX 官方資料載入，不使用固定示範資料
 
-    const parkingData = [
-      { id: 'pk-1', name: '高雄車站地下停車場', available: 142, total: 450, rate: '30元/時', lat: 22.6392, lng: 120.3028 },
-      { id: 'pk-2', name: '三民區公所立體停車場', available: 28, total: 180, rate: '20元/時', lat: 22.6465, lng: 120.3215 },
-      { id: 'pk-3', name: '科工館南館地下停車場', available: 95, total: 320, rate: '30元/時', lat: 22.6408, lng: 120.3235 },
-      { id: 'pk-4', name: '河堤社區鼎泰廣場停車場', available: 7, total: 110, rate: '30元/時', lat: 22.6625, lng: 120.3125 },
-      { id: 'pk-5', name: '台北市民大道敦延段停車場', available: 54, total: 380, rate: '40元/時', lat: 25.0452, lng: 121.5515 },
-      { id: 'pk-6', name: '台中市政公園地下停車場', available: 118, total: 600, rate: '20元/時', lat: 24.1618, lng: 120.6468 }
-    ];
+    let parkingData = []; // 由 TDX 官方資料載入，不使用固定示範資料
 
     // =========================================================================
     // 4. 路況顏色與繪製引擎
@@ -849,63 +750,51 @@
           iconAnchor: [14, 14]
         });
 
-        // 動態 SVG 模擬即時路況監視器畫面
+        const cameraMedia = cam.imageUrl
+          ? `<img src="${cam.imageUrl}" alt="官方監視器影像" loading="lazy" referrerpolicy="no-referrer" class="w-full h-32 object-cover rounded-xl bg-slate-900 border border-white/15 mb-2">`
+          : cam.streamUrl
+            ? `<a href="${cam.streamUrl}" target="_blank" rel="noopener" class="block text-center text-sky-300 bg-slate-900 rounded-xl p-4 mb-2">開啟官方即時影像 <span aria-hidden="true">↗</span></a>`
+            : `<div class="w-full h-20 rounded-xl bg-slate-900 border border-white/15 mb-2 flex items-center justify-center text-slate-400 text-xs">官方未提供可直接播放的影像連結</div>`;
         const popupHtml = `
           <div class="p-1 w-[240px]">
             <div class="flex items-center justify-between mb-1.5">
-              <span class="text-[10px] font-bold text-sky-400 flex items-center gap-1">
-                <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span> LIVE CCTV
-              </span>
-              <span class="text-[10px] text-slate-400">${cam.direction}</span>
+              <span class="text-[10px] font-bold text-sky-400">官方 CCTV</span>
+              <span class="text-[10px] text-slate-400">${cam.direction || cam.region || ''}</span>
             </div>
             <div class="text-xs font-bold text-white mb-2">${cam.name}</div>
-
-            <!-- 模擬路況攝影機畫面 -->
-            <div class="relative w-full h-28 rounded-xl overflow-hidden bg-slate-900 border border-white/15 mb-2">
-              <svg viewBox="0 0 240 110" class="w-full h-full">
-                <defs>
-                  <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#0f172a"/>
-                    <stop offset="100%" stop-color="#1e293b"/>
-                  </linearGradient>
-                </defs>
-                <rect width="240" height="110" fill="url(#skyGrad)"/>
-                <!-- 遠景城市燈光 -->
-                <circle cx="30" cy="32" r="1.5" fill="#fbbf24" opacity="0.7"/>
-                <circle cx="55" cy="28" r="1.2" fill="#38bdf8" opacity="0.7"/>
-                <circle cx="195" cy="30" r="1.5" fill="#fbbf24" opacity="0.8"/>
-                <circle cx="215" cy="35" r="1.2" fill="#f87171" opacity="0.7"/>
-                <!-- 透視道路 -->
-                <polygon points="95,42 145,42 225,110 15,110" fill="#334155"/>
-                <line x1="120" y1="42" x2="120" y2="110" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,6"/>
-                <!-- 車頭燈與車尾燈光軌 -->
-                <ellipse cx="95" cy="72" rx="4" ry="2.5" fill="#ef4444"/>
-                <ellipse cx="106" cy="72" rx="4" ry="2.5" fill="#ef4444"/>
-                <ellipse cx="85" cy="92" rx="5" ry="3" fill="#ef4444"/>
-                <ellipse cx="100" cy="92" rx="5" ry="3" fill="#ef4444"/>
-                <ellipse cx="136" cy="68" rx="3.5" ry="2" fill="#fef08a"/>
-                <ellipse cx="145" cy="68" rx="3.5" ry="2" fill="#fef08a"/>
-                <ellipse cx="146" cy="88" rx="5" ry="3" fill="#fef08a"/>
-                <ellipse cx="160" cy="88" rx="5" ry="3" fill="#fef08a"/>
-              </svg>
-              <div class="cctv-scanline absolute inset-0 pointer-events-none"></div>
-              <div class="absolute top-1.5 left-2 text-[9px] font-mono text-emerald-400 bg-black/60 px-1.5 py-0.5 rounded">
-                CAM-${cam.id.toUpperCase()} • 30FPS
-              </div>
-              <div class="absolute bottom-1.5 right-2 text-[9px] font-mono text-white/80 bg-black/60 px-1.5 py-0.5 rounded">
-                ${new Date().toLocaleTimeString('zh-TW', { hour12: false })}
-              </div>
-            </div>
-
-            <div class="text-[11px] text-slate-300 flex items-center justify-between bg-white/5 px-2.5 py-1.5 rounded-lg">
-              <span>車流偵測：</span>
-              <span class="font-semibold text-sky-300">${cam.flow}</span>
-            </div>
+            ${cameraMedia}
+            <div class="text-[10px] text-slate-400">資料來源：${cam.source || 'TDX'} · ${cam.updatedAt || '更新時間未提供'}</div>
           </div>
         `;
 
         L.marker([cam.lat, cam.lng], { icon }).bindPopup(popupHtml).addTo(layers.cctv);
       });
+    }
+
+    async function loadSupplementalTrafficLayers() {
+      try {
+        const response = await fetch('./data/tdx-layers.json?ts=' + Date.now(), { cache: 'no-store' });
+        if (!response.ok) throw new Error('官方即時資訊資料尚未更新');
+        const payload = await response.json();
+        incidentsData = Array.isArray(payload.incidents) ? payload.incidents : [];
+        cctvData = Array.isArray(payload.cctv) ? payload.cctv : [];
+        parkingData = Array.isArray(payload.parking) ? payload.parking : [];
+        renderIncidents();
+        renderCCTV();
+        renderParking();
+        const counts = `事故/施工 ${incidentsData.length} · CCTV ${cctvData.length} · 停車場 ${parkingData.length}`;
+        console.info('[TDX supplementary layers]', counts, payload.sources || []);
+        const updated = document.getElementById('last-update-time');
+        if (updated && payload.generatedAt) updated.title = '即時資訊圖層更新：' + payload.generatedAt;
+      } catch (error) {
+        console.warn('[TDX supplementary layers]', error);
+        incidentsData = [];
+        cctvData = [];
+        parkingData = [];
+        renderIncidents();
+        renderCCTV();
+        renderParking();
+      }
     }
 
     function renderParking() {
@@ -1289,6 +1178,7 @@
       renderIncidents();
       renderCCTV();
       renderParking();
+      loadSupplementalTrafficLayers();
       updateClockLabel();
       loadTdxTrafficData(false);
       autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
