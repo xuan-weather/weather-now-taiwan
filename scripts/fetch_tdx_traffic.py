@@ -105,7 +105,7 @@ def extract_items(payload):
         error = payload.get("error") or {}
         raise RuntimeError(f"TDX returned {error.get('message') or error or 'success=false'}")
     # TDX 路況資料常以 LiveTrafficList/LiveTraffic、SectionShapeList/SectionShapes 包裝。
-    preferred = ("LiveTraffic", "LiveEvent", "RoadEvent", "CCTV", "ParkingAvailability", "ParkingLot", "SectionShape", "LiveTraffics", "LiveEvents", "RoadEventList", "CCTVList", "ParkingAvailabilityList", "ParkingLotList", "SectionShapes", "value", "data", "Data")
+    preferred = ("LiveTraffic", "LiveEvent", "RoadEvent", "CCTV", "ParkingAvailability", "ParkingLot", "SectionShape", "LiveTraffics", "LiveEvents", "RoadEventList", "LiveEventList", "CCTVList", "ParkingAvailabilityList", "ParkingLotList", "SectionShapes", "value", "data", "Data")
     for key in preferred:
         if key in payload:
             found = extract_items(payload[key])
@@ -554,7 +554,7 @@ def fetch_supplemental_layers(bearer):
     # Parking availability is refreshed each run; lot coordinates/name are joined by ParkingID.
     for city,label in SUPPLEMENTAL_CITIES:
         try:
-            lots=rows(f"Parking/OffStreet/ParkingLot/City/{city}",bearer)
+            lots=cached_static_rows(f"Parking/OffStreet/ParkingLot/City/{city}",bearer,cache)
             availability=rows(f"Parking/OffStreet/ParkingAvailability/City/{city}",bearer)
             lot_by_id={}
             for lot in lots:
