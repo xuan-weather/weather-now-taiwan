@@ -462,7 +462,7 @@ def parse_event_point(item):
     if isinstance(raw,dict):
         return coordinates({"Position":raw})
     if isinstance(raw,str):
-        match=re.search(r"POINT\\s*\\(\\s*([-\\d.]+)\\s+([-\\d.]+)",raw,re.I)
+        match=re.search(r"POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)",raw,re.I)
         if match:
             lon,lat=float(match.group(1)),float(match.group(2))
             if 20 <= lat <= 27 and 118 <= lon <= 123:
@@ -492,9 +492,18 @@ def fetch_event_records(bearer,authority):
                         loc_text=field_value(v,"Road","RoadName","Description") or loc_text
         description=field_value(impact,"Description") if isinstance(impact,dict) else None
         title=field_value(item,"Description","EventTitle","EventType","Title") or "道路事件"
+        searchable=(str(title)+" "+str(description or "")+" "+str(field_value(item,"EventType","EventTypeCode") or "")).lower()
+        if any(word in searchable for word in ("施工","roadwork","workzone","維護")):
+            event_type="roadwork"
+        elif any(word in searchable for word in ("事故","車禍","accident","collision")):
+            event_type="accident"
+        elif any(word in searchable for word in ("故障","breakdown","拋錨")):
+            event_type="breakdown"
+        else:
+            event_type="incident"
         output.append({
             "id":str(field_value(item,"EventID","EventId","ID") or f"{authority}-{len(output)}"),
-            "type":str(field_value(item,"EventType","EventTypeCode","EventCategory") or "incident"),
+            "type":event_type,
             "title":str(title),
             "desc":str(description or field_value(item,"Comment","Remark","Description") or ""),
             "time":str(field_value(item,"PublishTime","EffectiveTime","UpdateTime") or ""),
