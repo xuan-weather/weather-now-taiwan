@@ -16,21 +16,29 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 12.0
+MIN_REQUEST_INTERVAL = 15.0
 _last_request_at = 0.0
-CITIES = [
-    # 依 TDX API 回傳的 City enum，僅查詢此端點實際接受的縣市代碼。
-    ("YilanCounty","宜蘭縣","yilan"),
-    ("MiaoliCounty","苗栗縣","miaoli"),
-    ("ChanghuaCounty","彰化縣","changhua"),
-    ("YunlinCounty","雲林縣","yunlin"),
-    ("PingtungCounty","屏東縣","pingtung"),
-    ("Keelung","基隆市","keelung"),
-    ("Taipei","臺北市","taipei"),
-    ("Taichung","臺中市","taichung"),
-    ("Tainan","臺南市","tainan"),
+
+# TDX 各路況端點的 City enum 不相同，依錯誤回應列出的清單分開設定。
+LIVE_CITIES = [
+    ("YilanCounty","宜蘭縣","yilan"),("MiaoliCounty","苗栗縣","miaoli"),
+    ("ChanghuaCounty","彰化縣","changhua"),("YunlinCounty","雲林縣","yunlin"),
+    ("PingtungCounty","屏東縣","pingtung"),("Keelung","基隆市","keelung"),
+    ("Taipei","臺北市","taipei"),("Taichung","臺中市","taichung"),
+    ("Tainan","臺南市","tainan"),("Taoyuan","桃園市","taoyuan")
+]
+SHAPE_CITIES = [
+    ("YilanCounty","宜蘭縣","yilan"),("HsinchuCounty","新竹縣","hsinchu_county"),
+    ("MiaoliCounty","苗栗縣","miaoli"),("YunlinCounty","雲林縣","yunlin"),
+    ("PingtungCounty","屏東縣","pingtung"),("Keelung","基隆市","keelung"),
+    ("Taipei","臺北市","taipei"),("Kaohsiung","高雄市","kaohsiung"),
+    ("Taichung","臺中市","taichung"),("Tainan","臺南市","tainan"),
     ("Taoyuan","桃園市","taoyuan")
 ]
+LIVE_BY_CODE = {item[0]: item for item in LIVE_CITIES}
+SHAPE_BY_CODE = {item[0]: item for item in SHAPE_CITIES}
+CITY_PAIRS = [(LIVE_BY_CODE[code], SHAPE_BY_CODE[code]) for code in LIVE_BY_CODE if code in SHAPE_BY_CODE]
+
 
 def decode_response(raw, headers=None):
     # urllib 不會自動解壓 gzip；依標頭或 gzip magic bytes 判斷後再解析。
@@ -208,22 +216,29 @@ def main():
     bearer=token()
     all_segments=[]
     stats=[]
-    sources=[(f"Road/Traffic/Live/City/{city}",f"Road/Traffic/SectionShape/City/{city}",f"Road/Traffic/Section/City/{city}",label,region,"縣市") for city,label,region in CITIES]
-    sources += [
-        ("Road/Traffic/Live/Highway","Road/Traffic/SectionShape/Highway","Road/Traffic/Section/Highway","全台省道","highway","省道"),
-        ("Road/Traffic/Live/Freeway","Road/Traffic/SectionShape/Freeway","Road/Traffic/Section/Freeway","全台國道","freeway","國道")
-    ]
-    for live_path,shape_path,section_path,label,region,kind in sources:
+    # 市區即時車速與線型圖資各自使用支援的 City enum，只處理兩端點的交集。
+    for live_city, shape_city in CITY_PAIRS:
+        city_code, label, region = live_city
         try:
-            live=rows(live_path,bearer)
-            time.sleep(0.6)
-            shapes=rows(shape_path,bearer)
-            time.sleep(0.6)
-            sections=rows(section_path,bearer)
-            segments=build_segments(live,shapes,region,label,f"TDX {kind}即時路況",sections)
+            live = rows(f"Road/Traffic/Live/City/{city_code}", bearer)
+            shapes = rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer)
+            segments = build_segments(live, shapes, region, label, "TDX 縣市即時路況")
             all_segments.extend(segments)
-            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"sectionRecords":len(sections),"mappedSegments":len(segments),"ok":True})
-            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} sections={len(sections)} mapped={len(segments)}")
+            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
+            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)}")
+        except Exception as exc:
+            stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
+            print(f"[WARN] {label}: {exc}",file=sys.stderr)
+
+    # 國道、省道使用全國性端點，不帶縣市代碼。
+    for category, label, region in (("Highway","全台省道","highway"),("Freeway","全台國道","freeway")):
+        try:
+            live = rows(f"Road/Traffic/Live/{category}", bearer)
+            shapes = rows(f"Road/Traffic/SectionShape/{category}", bearer)
+            segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況")
+            all_segments.extend(segments)
+            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
+            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)}")
         except Exception as exc:
             stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
