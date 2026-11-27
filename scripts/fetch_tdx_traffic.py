@@ -16,7 +16,7 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 15.0
+MIN_REQUEST_INTERVAL = 1.0  # 每個 API 請求間隔 1 秒；429 仍依 Retry-After 自動退避
 _last_request_at = 0.0
 
 # TDX 各路況端點的 City enum 不相同，依錯誤回應列出的清單分開設定。
@@ -49,11 +49,11 @@ def decode_response(raw, headers=None):
 
 def get_json(url, headers=None, body=None):
     global _last_request_at
-    request_headers = {"Accept": "application/json", "Accept-Encoding": "identity"}
+    request_headers = {"Accept": "application/json", "Accept-Encoding": "gzip"}
     request_headers.update(headers or {})
     req = Request(url, headers=request_headers, data=body, method="POST" if body is not None else "GET")
     for attempt in range(6):
-        # TDX API 共用節流；保守降低請求頻率，避免 429。
+        # TDX API 共用節流；一般請求間隔 1 秒，遇到 429 仍依 Retry-After／退避策略等待。
         elapsed = time.monotonic() - _last_request_at
         if elapsed < MIN_REQUEST_INTERVAL:
             time.sleep(MIN_REQUEST_INTERVAL - elapsed)
@@ -125,7 +125,7 @@ def rows(path, bearer):
         payload = get_json(f"{API_ROOT}/{path}?{query}", {
             "Authorization":f"Bearer {bearer}",
             "Accept":"application/json",
-            "Accept-Encoding":"identity"
+            "Accept-Encoding":"gzip"
         })
         batch = extract_items(payload)
         result.extend(batch)
