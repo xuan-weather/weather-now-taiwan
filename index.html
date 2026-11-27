@@ -592,7 +592,7 @@
       const candidates = [
         seg.updateTime, seg.UpdateTime, seg.updatedAt, seg.UpdatedAt,
         seg.dataTime, seg.DataTime, seg.timestamp, seg.Timestamp,
-        seg.observedAt, seg.ObservedAt
+        seg.observedAt, seg.ObservedAt, seg.feedUpdateTime, seg._FeedUpdateTime
       ];
       for (const value of candidates) {
         const parsed = parseTrafficTimestamp(value);
@@ -645,12 +645,13 @@
           latestByRoad.set(key, {
             ...seg,
             _trafficTimestamp: timestamp,
-            _speedValid: speed > 0,
+            _speedValid: speed >= 0,
             _congestionLevel: resolvedLevel,
             _levelSource: levelSource,
-            _stale: !Number.isFinite(timestamp) ||
+            _stale: Number.isFinite(timestamp) && (
               (Date.now() - timestamp > TRAFFIC_STALE_AFTER_MS) ||
               (timestamp - Date.now() > 5 * 60 * 1000)
+            )
           });
         }
       }
@@ -920,10 +921,10 @@
         dot.classList.remove('bg-slate-500', 'bg-rose-500');
         if (manual) {
           const staleCount = roadSegments.filter(seg => seg._stale).length;
-          const zeroCount = roadSegments.filter(seg => !seg._speedValid && !seg._stale).length;
-          const validCount = roadSegments.filter(seg => !seg._stale && seg._speedValid && seg._congestionLevel !== null).length;
+          const timeUnknownCount = roadSegments.filter(seg => !seg._stale && !Number.isFinite(seg._trafficTimestamp)).length;
+          const validCount = roadSegments.filter(seg => !seg._stale && seg._speedValid).length;
           const pendingLevelCount = roadSegments.filter(seg => !seg._stale && seg._speedValid && seg._congestionLevel === null).length;
-          showToast(`路況 ${roadSegments.length.toLocaleString('zh-TW')} 筆｜有效 ${validCount.toLocaleString('zh-TW')}｜待確認 ${(zeroCount + pendingLevelCount).toLocaleString('zh-TW')}\n0 車速 ${zeroCount}／分級 ${pendingLevelCount}｜過期 ${staleCount}`);
+          showToast(`路況 ${roadSegments.length.toLocaleString('zh-TW')} 筆｜有效車速 ${validCount.toLocaleString('zh-TW')}\n分級待補 ${pendingLevelCount}｜時間待確認 ${timeUnknownCount}｜過期 ${staleCount}`);
         }
         if (!roadSegments.length) showToast('目前沒有可顯示的官方路段資料，請稍後重試');
       } catch (error) {
