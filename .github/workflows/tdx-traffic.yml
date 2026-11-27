@@ -1,0 +1,41 @@
+name: Update Nationwide TDX Traffic
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "index.html"
+      - "scripts/fetch_tdx_traffic.py"
+      - ".github/workflows/tdx-traffic.yml"
+  schedule:
+    - cron: "*/10 * * * *"
+permissions:
+  contents: write
+concurrency:
+  group: tdx-traffic-data
+  cancel-in-progress: true
+jobs:
+  update-traffic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch nationwide official TDX traffic
+        env:
+          TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
+          TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
+        run: python scripts/fetch_tdx_traffic.py
+      - name: Commit refreshed traffic JSON
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/tdx-traffic.json
+          if git diff --cached --quiet; then
+            echo "No traffic data changes."
+          else
+            git commit -m "Update nationwide TDX traffic data"
+            git push
+          fi

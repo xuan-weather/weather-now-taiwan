@@ -472,185 +472,7 @@
     // =========================================================================
     // 2. 台灣主要道路即時路況資料 (高雄三民區、國1、國10、台北、台中)
     // =========================================================================
-    const roadSegments = [
-      // --- 高雄市三民區 / 國道1號 / 國道10號 ---
-      {
-        id: 'kh-n1-1',
-        name: '國道1號 (鼎金系統 - 九如交流道 南下)',
-        region: 'kaohsiung',
-        speedLimit: 100,
-        speed: 32,
-        coords: [
-          [22.6785, 120.3268],
-          [22.6712, 120.3292],
-          [22.6635, 120.3315],
-          [22.6540, 120.3338],
-          [22.6435, 120.3352]
-        ]
-      },
-      {
-        id: 'kh-n1-2',
-        name: '國道1號 (九如交流道 - 鼎金系統 北上)',
-        region: 'kaohsiung',
-        speedLimit: 100,
-        speed: 68,
-        coords: [
-          [22.6435, 120.3362],
-          [22.6540, 120.3348],
-          [22.6635, 120.3325],
-          [22.6712, 120.3302],
-          [22.6785, 120.3278]
-        ]
-      },
-      {
-        id: 'kh-n10-1',
-        name: '國道10號 (左營端 - 鼎金系統 東向)',
-        region: 'kaohsiung',
-        speedLimit: 100,
-        speed: 48,
-        coords: [
-          [22.6815, 120.3055],
-          [22.6795, 120.3150],
-          [22.6775, 120.3265],
-          [22.6762, 120.3385]
-        ]
-      },
-      {
-        id: 'kh-jiuru',
-        name: '九如一路 / 九如二路 (三民區主幹道)',
-        region: 'kaohsiung',
-        speedLimit: 50,
-        speed: 18,
-        coords: [
-          [22.6438, 120.3025],
-          [22.6435, 120.3145],
-          [22.6432, 120.3250],
-          [22.6430, 120.3350],
-          [22.6425, 120.3440]
-        ]
-      },
-      {
-        id: 'kh-boai',
-        name: '博愛一路 / 博愛二路 (後驛 - 巨蛋段)',
-        region: 'kaohsiung',
-        speedLimit: 50,
-        speed: 44,
-        coords: [
-          [22.6395, 120.3022],
-          [22.6480, 120.3028],
-          [22.6575, 120.3032],
-          [22.6675, 120.3025]
-        ]
-      },
-      {
-        id: 'kh-minzu',
-        name: '民族一路 (三民區南北向幹道)',
-        region: 'kaohsiung',
-        speedLimit: 60,
-        speed: 55,
-        coords: [
-          [22.6380, 120.3135],
-          [22.6485, 120.3142],
-          [22.6590, 120.3150],
-          [22.6710, 120.3162]
-        ]
-      },
-      {
-        id: 'kh-dazhong',
-        name: '大中一路 / 大中二路 (快速道路平面段)',
-        region: 'kaohsiung',
-        speedLimit: 60,
-        speed: 26,
-        coords: [
-          [22.6788, 120.3060],
-          [22.6772, 120.3165],
-          [22.6758, 120.3270],
-          [22.6745, 120.3380]
-        ]
-      },
-      {
-        id: 'kh-jianguo',
-        name: '建國二路 / 建國三路 (高雄車站前)',
-        region: 'kaohsiung',
-        speedLimit: 50,
-        speed: 35,
-        coords: [
-          [22.6382, 120.2965],
-          [22.6385, 120.3045],
-          [22.6380, 120.3145],
-          [22.6372, 120.3255]
-        ]
-      },
-
-      // --- 台北市區 ---
-      {
-        id: 'tp-n1',
-        name: '國道1號 (圓山 - 內湖交流道 北上)',
-        region: 'taipei',
-        speedLimit: 100,
-        speed: 28,
-        coords: [
-          [25.0725, 121.5240],
-          [25.0748, 121.5380],
-          [25.0732, 121.5540],
-          [25.0685, 121.5720]
-        ]
-      },
-      {
-        id: 'tp-civic',
-        name: '市民大道高架 (台北車站 - 復興南路)',
-        region: 'taipei',
-        speedLimit: 80,
-        speed: 45,
-        coords: [
-          [25.0488, 121.5150],
-          [25.0472, 121.5280],
-          [25.0455, 121.5435],
-          [25.0448, 121.5580]
-        ]
-      },
-      {
-        id: 'tp-jianguo',
-        name: '建國高架道路 (辛亥 - 民權東路)',
-        region: 'taipei',
-        speedLimit: 80,
-        speed: 64,
-        coords: [
-          [25.0245, 121.5372],
-          [25.0385, 121.5375],
-          [25.0525, 121.5372],
-          [25.0665, 121.5368]
-        ]
-      },
-
-      // --- 台中市區 ---
-      {
-        id: 'tc-taiwanblvd',
-        name: '臺灣大道三段 / 四段 (朝馬 - 新光三越)',
-        region: 'taichung',
-        speedLimit: 60,
-        speed: 22,
-        coords: [
-          [24.1785, 120.6250],
-          [24.1725, 120.6365],
-          [24.1665, 120.6465],
-          [24.1605, 120.6565]
-        ]
-      },
-      {
-        id: 'tc-74',
-        name: '台74線快速道路 (西屯 - 北屯段)',
-        region: 'taichung',
-        speedLimit: 80,
-        speed: 72,
-        coords: [
-          [24.1680, 120.6285],
-          [24.1815, 120.6420],
-          [24.1910, 120.6620],
-          [24.1885, 120.6850]
-        ]
-      }
-    ];
+    let roadSegments = []; // 由 TDX 全台官方即時路況資料載入
 
     // =========================================================================
     // 3. 事故、施工、CCTV 監視器與停車場資料
@@ -779,55 +601,37 @@
 
     function renderTrafficNetwork() {
       layers.traffic.clearLayers();
+      Object.keys(polylineMap).forEach(key => delete polylineMap[key]);
 
       roadSegments.forEach(seg => {
-        const style = getSpeedStyle(seg.speed);
-
-        // 外層深色描邊增加對比度
+        if (!Array.isArray(seg.coords) || seg.coords.length < 2 || !Number.isFinite(Number(seg.speed))) return;
+        const style = getSpeedStyle(Number(seg.speed));
         const outline = L.polyline(seg.coords, {
-          color: '#020617',
-          weight: 9,
-          opacity: 0.65,
-          lineCap: 'round',
-          lineJoin: 'round'
+          color: '#020617', weight: 8, opacity: 0.58,
+          lineCap: 'round', lineJoin: 'round'
         });
-
-        // 主路況顏色線段
         const line = L.polyline(seg.coords, {
-          color: style.color,
-          weight: 5.5,
-          opacity: 0.95,
-          lineCap: 'round',
-          lineJoin: 'round',
-          className: 'traffic-glow'
+          color: style.color, weight: 5, opacity: 0.96,
+          lineCap: 'round', lineJoin: 'round', className: 'traffic-glow'
         });
-
-        const travelMinutes = Math.max(2, Math.round((seg.speedLimit / Math.max(seg.speed, 10)) * 3.5));
-
         const popupHtml = `
           <div class="p-1 min-w-[210px]">
             <div class="flex items-center justify-between gap-2 mb-1.5">
               <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${style.badgeClass}">${style.label}</span>
-              <span class="text-[10px] text-slate-400">速限 ${seg.speedLimit} km/h</span>
+              <span class="text-[10px] text-slate-400">${seg.sourceLabel || 'TDX 官方路況'}</span>
             </div>
             <div class="text-xs font-bold text-white mb-2 leading-snug">${seg.name}</div>
-            <div class="grid grid-cols-2 gap-2 bg-white/5 rounded-xl p-2 text-center">
-              <div>
-                <div class="text-[10px] text-slate-400">即時平均車速</div>
-                <div class="text-base font-extrabold" style="color:${style.color}">${seg.speed} <span class="text-[10px] font-normal text-slate-300">km/h</span></div>
-              </div>
-              <div>
-                <div class="text-[10px] text-slate-400">預估通過時間</div>
-                <div class="text-base font-extrabold text-white">${travelMinutes} <span class="text-[10px] font-normal text-slate-300">分鐘</span></div>
-              </div>
+            <div class="bg-white/5 rounded-xl p-2 text-center">
+              <div class="text-[10px] text-slate-400">官方即時平均車速</div>
+              <div class="text-base font-extrabold" style="color:${style.color}">${Math.round(Number(seg.speed))} <span class="text-[10px] font-normal text-slate-300">km/h</span></div>
             </div>
+            <div class="text-[10px] text-slate-400 mt-2">路段編號：${seg.id}</div>
+            <div class="text-[10px] text-slate-400">資料時間：${seg.updateTime || '依官方資料更新'}</div>
           </div>
         `;
-
         line.bindPopup(popupHtml);
-        line.on('mouseover', function () { this.setStyle({ weight: 8 }); });
-        line.on('mouseout', function () { this.setStyle({ weight: 5.5 }); });
-
+        line.on('mouseover', function () { this.setStyle({ weight: 7 }); });
+        line.on('mouseout', function () { this.setStyle({ weight: 5 }); });
         outline.addTo(layers.traffic);
         line.addTo(layers.traffic);
         polylineMap[seg.id] = line;
@@ -1001,53 +805,63 @@
     }
 
     // =========================================================================
-    // 6. 即時動態模擬與更新機制
+    // 6. TDX 全台官方路況資料載入（不再使用隨機模擬車速）
     // =========================================================================
     let autoSimTimer = null;
+    let trafficLoading = false;
 
-    function updateClockLabel() {
-      const now = new Date();
-      document.getElementById('last-update-time').textContent = now.toLocaleTimeString('zh-TW', { hour12: false });
+    function updateClockLabel(value) {
+      const date = value ? new Date(value) : new Date();
+      document.getElementById('last-update-time').textContent =
+        Number.isNaN(date.getTime()) ? '資料時間未知' :
+        date.toLocaleTimeString('zh-TW', { hour12: false });
+    }
+
+    async function loadTdxTrafficData(manual = false) {
+      if (trafficLoading) return;
+      trafficLoading = true;
+      const dot = document.getElementById('live-dot');
+      try {
+        const response = await fetch('./data/tdx-traffic.json?ts=' + Date.now(), { cache: 'no-store' });
+        if (!response.ok) throw new Error('官方路況資料尚未發布（HTTP ' + response.status + '）');
+        const payload = await response.json();
+        if (!payload || !Array.isArray(payload.segments)) throw new Error('TDX 路況資料格式不正確');
+        roadSegments = payload.segments.filter(seg =>
+          Array.isArray(seg.coords) && seg.coords.length >= 2 && Number.isFinite(Number(seg.speed))
+        );
+        renderTrafficNetwork();
+        updateClockLabel(payload.generatedAt);
+        dot.classList.add('bg-emerald-400');
+        dot.classList.remove('bg-slate-500', 'bg-rose-500');
+        if (manual) showToast('已載入 ' + roadSegments.length + ' 筆全台官方路況路段');
+        if (!roadSegments.length) showToast('目前沒有可顯示的官方路段資料，請稍後重試');
+      } catch (error) {
+        dot.classList.remove('bg-emerald-400');
+        dot.classList.add('bg-rose-500');
+        if (manual) showToast('路況資料載入失敗：' + error.message);
+        console.error('[TDX traffic]', error);
+      } finally {
+        trafficLoading = false;
+      }
     }
 
     function simulateTrafficUpdate(manual = false) {
-      roadSegments.forEach(seg => {
-        // 隨機微調速度 (-8 ~ +8 km/h)，並限制在合理區間
-        const delta = Math.floor(Math.random() * 17) - 8;
-        const minSpd = 12;
-        const maxSpd = seg.speedLimit + 5;
-        seg.speed = Math.max(minSpd, Math.min(maxSpd, seg.speed + delta));
-      });
-
-      // 微調停車場空位
-      parkingData.forEach(pk => {
-        const diff = Math.floor(Math.random() * 5) - 2;
-        pk.available = Math.max(0, Math.min(pk.total, pk.available + diff));
-      });
-
-      renderTrafficNetwork();
-      if (document.getElementById('chk-parking').checked) {
-        renderParking();
-      }
-      updateClockLabel();
-
-      if (manual) {
-        showToast('已更新全台最新即時車速與空位資訊');
-      }
+      // 保留既有刷新按鈕介面，實際改為重新讀取官方資料。
+      loadTdxTrafficData(manual);
     }
 
     function toggleAutoSimulation(enabled) {
       const dot = document.getElementById('live-dot');
+      if (autoSimTimer) clearInterval(autoSimTimer);
       if (enabled) {
         dot.classList.add('animate-pulse', 'bg-emerald-400');
         dot.classList.remove('bg-slate-500');
-        autoSimTimer = setInterval(() => simulateTrafficUpdate(false), 5000);
-        showToast('已開啟即時路況動態更新 (每 5 秒)');
+        autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
+        showToast('已開啟官方路況資料自動更新檢查');
       } else {
         dot.classList.remove('animate-pulse', 'bg-emerald-400');
         dot.classList.add('bg-slate-500');
-        clearInterval(autoSimTimer);
-        showToast('已暫停自動動態更新');
+        showToast('已暫停自動更新檢查');
       }
     }
 
@@ -1329,7 +1143,7 @@
       renderCCTV();
       renderParking();
       updateClockLabel();
-      autoSimTimer = setInterval(() => simulateTrafficUpdate(false), 5000);
+      loadTdxTrafficData(false);\n      autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
     });
   </script>
 </body>
