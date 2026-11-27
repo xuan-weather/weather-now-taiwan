@@ -1143,7 +1143,10 @@
       renderCCTV();
       renderParking();
       updateClockLabel();
-      loadTdxTrafficData(false);\n      autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
+      loadTdxTrafficData(false);
+      autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
+      // iPhone Safari 首屏尺寸穩定後重新計算 Leaflet 地圖尺寸
+      requestAnimationFrame(() => map.invalidateSize(true));
     });
   </script>
 </body>

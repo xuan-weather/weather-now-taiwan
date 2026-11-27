@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from email.utils import parsedate_to_datetime
 
 
 CLIENT_ID = os.environ.get("TDX_CLIENT_ID", "").strip()
@@ -15,6 +16,8 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
+MIN_REQUEST_INTERVAL = 4.0
+_last_request_at = 0.0
 CITIES = [
     ("Taipei","臺北市","taipei"),("NewTaipei","新北市","newtaipei"),
     ("Taoyuan","桃園市","taoyuan"),("Taichung","臺中市","taichung"),
@@ -30,15 +33,33 @@ CITIES = [
 ]
 
 def get_json(url, headers=None, body=None):
+    global _last_request_at
     req = Request(url, headers=headers or {}, data=body, method="POST" if body is not None else "GET")
     for attempt in range(6):
+        # TDX 依 API Key 方案限制呼叫頻率；所有端點共用節流，避免 22 縣市連續打爆。
+        elapsed = time.monotonic() - _last_request_at
+        if elapsed < MIN_REQUEST_INTERVAL:
+            time.sleep(MIN_REQUEST_INTERVAL - elapsed)
         try:
-            with urlopen(req, timeout=50) as response:
+            with urlopen(req, timeout=60) as response:
+                _last_request_at = time.monotonic()
                 return json.loads(response.read().decode("utf-8-sig"))
         except HTTPError as exc:
+            _last_request_at = time.monotonic()
             if exc.code == 429 and attempt < 5:
-                wait = min(60, 3 * (2 ** attempt))
-                print(f"[RATE LIMIT] HTTP 429; retry in {wait}s", file=sys.stderr)
+                retry_after = exc.headers.get("Retry-After", "")
+                wait = None
+                if retry_after:
+                    try:
+                        wait = max(1, int(retry_after))
+                    except ValueError:
+                        try:
+                            wait = max(1, int((parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds()))
+                        except Exception:
+                            wait = None
+                if wait is None:
+                    wait = min(120, 20 * (2 ** attempt))
+                print(f"[RATE LIMIT] TDX HTTP 429; cooldown {wait}s before retry {attempt + 1}/5", file=sys.stderr)
                 time.sleep(wait)
                 continue
             detail = exc.read().decode("utf-8", "replace")[:500]
