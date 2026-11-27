@@ -34,19 +34,37 @@
       background-color: #0f172a;
     }
 
-    /* 手機橫向／直向都讓 Leaflet 地圖真正鋪滿可視視窗 */
-    #map {
-      position: fixed;
-      inset: 0;
-      display: block;
-      width: 100vw !important;
-      width: 100dvw !important;
-      height: 100vh !important;
-      height: 100dvh !important;
+    /* 地圖以 fixed 四邊定位填滿視窗，不依賴 100vw/100dvw；
+       iOS Safari 橫向時這些 viewport 單位可能與實際可視寬度不一致。 */
+    html, body {
       max-width: none !important;
+      box-sizing: border-box;
+    }
+
+    #map {
+      position: fixed !important;
+      left: 0 !important;
+      right: 0 !important;
+      top: 0 !important;
+      bottom: 0 !important;
+      width: auto !important;
+      height: auto !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      min-height: 0 !important;
+      max-height: none !important;
       margin: 0 !important;
       padding: 0 !important;
+      box-sizing: border-box !important;
+      display: block;
       z-index: 1;
+    }
+
+    /* 確保 Leaflet 本體及圖磚容器不受頁面最大寬度限制 */
+    #map.leaflet-container {
+      width: auto !important;
+      height: auto !important;
+      max-width: none !important;
     }
 
 
