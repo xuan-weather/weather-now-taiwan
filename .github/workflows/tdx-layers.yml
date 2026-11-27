@@ -57,6 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download available layer snapshots
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           path: layer-artifacts
@@ -73,7 +74,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p data
           cp layer-artifacts/tdx-*.json data/ 2>/dev/null || true
-          git add data/tdx-incidents.json data/tdx-cctv.json data/tdx-parking.json
+          git add data/tdx-*.json
           if git diff --cached --quiet; then
             echo "No supplementary layer changes."
             exit 0
