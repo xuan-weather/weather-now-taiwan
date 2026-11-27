@@ -485,9 +485,15 @@
       center: [23.7500, 120.9500],
       zoom: 7,
       layers: [baseLayers.dark],
-      zoomControl: false
+      zoomControl: false,
+      preferCanvas: true,
+      zoomAnimation: false,
+      fadeAnimation: false,
+      markerZoomAnimation: false
     });
 
+    // 大量全台路段改用單一 Canvas renderer，避免 SVG DOM 節點過多。
+    const trafficCanvasRenderer = L.canvas({ padding: 0.5 });
     let currentBaseMap = 'dark';
 
     // iOS Safari 旋轉螢幕後，重新計算 Leaflet 地圖尺寸，避免左右留下底色空白。
@@ -646,45 +652,53 @@
       layers.traffic.clearLayers();
       Object.keys(polylineMap).forEach(key => delete polylineMap[key]);
 
+      const detailMode = map.getZoom() >= 10;
+      const lineWeight = map.getZoom() <= 8 ? 3.5 : (detailMode ? 5 : 4);
+
       roadSegments.forEach(seg => {
         if (!Array.isArray(seg.coords) || seg.coords.length < 2 || !Number.isFinite(Number(seg.speed))) return;
         const speed = Number(seg.speed);
         const style = getSpeedStyle(seg);
         const opacity = (seg._stale || !seg._speedValid || seg._congestionLevel === null) ? 0.72 : 0.96;
-        const outline = L.polyline(seg.coords, {
-          color: '#020617', weight: 8, opacity: 0.58,
-          lineCap: 'round', lineJoin: 'round'
-        });
+
+        // 每個路段只建立一條 Canvas 線，不再額外建立粗黑外框線。
         const line = L.polyline(seg.coords, {
-          color: style.color, weight: 5, opacity,
-          lineCap: 'round', lineJoin: 'round', className: 'traffic-glow'
+          renderer: trafficCanvasRenderer,
+          color: style.color,
+          weight: lineWeight,
+          opacity,
+          lineCap: 'round',
+          lineJoin: 'round',
+          smoothFactor: map.getZoom() <= 8 ? 2.5 : 1.5,
+          interactive: detailMode
         });
-        const timestampText = Number.isFinite(seg._trafficTimestamp)
-          ? new Date(seg._trafficTimestamp).toLocaleString('zh-TW', { hour12: false })
-          : (seg.updateTime || '無可確認時間');
-        const speedText = seg._speedValid
-          ? `${Math.round(speed)} <span class="text-[10px] font-normal text-slate-300">km/h</span>`
-          : '<span class="text-sm">車速資料待確認（0 km/h）</span>';
-        const popupHtml = `
-          <div class="p-1 min-w-[210px]">
-            <div class="flex items-center justify-between gap-2 mb-1.5">
-              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${style.badgeClass}">${style.label}</span>
-              <span class="text-[10px] text-slate-400">${seg.sourceLabel || 'TDX 官方路況'}</span>
+
+        if (detailMode) {
+          const timestampText = Number.isFinite(seg._trafficTimestamp)
+            ? new Date(seg._trafficTimestamp).toLocaleString('zh-TW', { hour12: false })
+            : (seg.updateTime || '無可確認時間');
+          const speedText = seg._speedValid
+            ? `${Math.round(speed)} <span class="text-[10px] font-normal text-slate-300">km/h</span>`
+            : '<span class="text-sm">車速資料待確認（0 km/h）</span>';
+          const popupHtml = `
+            <div class="p-1 min-w-[210px]">
+              <div class="flex items-center justify-between gap-2 mb-1.5">
+                <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${style.badgeClass}">${style.label}</span>
+                <span class="text-[10px] text-slate-400">${seg.sourceLabel || 'TDX 官方路況'}</span>
+              </div>
+              <div class="text-xs font-bold text-white mb-2 leading-snug">${seg.name || seg.roadName || '未命名路段'}</div>
+              <div class="bg-white/5 rounded-xl p-2 text-center">
+                <div class="text-[10px] text-slate-400">${seg._speedValid ? '官方即時平均車速' : '車速有效性檢查'}</div>
+                <div class="text-base font-extrabold" style="color:${style.color}">${speedText}</div>
+              </div>
+              <div class="text-[10px] text-slate-400 mt-2">路段編號：${seg.id ?? seg.segmentId ?? '未提供'}</div>
+              <div class="text-[10px] text-slate-400">資料時間：${timestampText}</div>
+              ${seg._stale ? '<div class="text-[10px] text-slate-300 mt-1">資料超過 30 分鐘或缺少觀測時間，已改以灰色標示，不列入即時壅塞判讀</div>' : ''}
             </div>
-            <div class="text-xs font-bold text-white mb-2 leading-snug">${seg.name || seg.roadName || '未命名路段'}</div>
-            <div class="bg-white/5 rounded-xl p-2 text-center">
-              <div class="text-[10px] text-slate-400">${seg._speedValid ? '官方即時平均車速' : '車速有效性檢查'}</div>
-              <div class="text-base font-extrabold" style="color:${style.color}">${speedText}</div>
-            </div>
-            <div class="text-[10px] text-slate-400 mt-2">路段編號：${seg.id ?? seg.segmentId ?? '未提供'}</div>
-            <div class="text-[10px] text-slate-400">資料時間：${timestampText}</div>
-            ${seg._stale ? '<div class="text-[10px] text-slate-300 mt-1">資料超過 30 分鐘或缺少觀測時間，已改以灰色標示，不列入即時壅塞判讀</div>' : ''}
-          </div>
-        `;
-        line.bindPopup(popupHtml);
-        line.on('mouseover', function () { this.setStyle({ weight: 7 }); });
-        line.on('mouseout', function () { this.setStyle({ weight: 5 }); });
-        outline.addTo(layers.traffic);
+          `;
+          line.bindPopup(popupHtml);
+        }
+
         line.addTo(layers.traffic);
         polylineMap[getSegmentIdentity(seg)] = line;
       });
@@ -744,6 +758,8 @@
 
     function renderCCTV() {
       layers.cctv.clearLayers();
+      // 全台縮放時避免一次建立數千個 DOM marker；放大到縣市/市區才顯示。
+      if (map.getZoom() < 11) return;
       cctvData.forEach(cam => {
         const icon = L.divIcon({
           className: 'custom-div-icon',
@@ -812,6 +828,8 @@
 
     function renderParking() {
       layers.parking.clearLayers();
+      // 停車場標記只在市區尺度顯示，避免全台大量 DOM marker 拖慢手機。
+      if (map.getZoom() < 11) return;
       parkingData.forEach(pk => {
         const isLow = pk.available < 15;
         const badgeColor = isLow ? 'bg-rose-600 border-rose-200' : 'bg-indigo-600 border-indigo-200';
@@ -848,6 +866,23 @@
         L.marker([pk.lat, pk.lng], { icon }).bindPopup(popupHtml).addTo(layers.parking);
       });
     }
+
+    // 只有跨越互動/標記顯示門檻時才重繪，平常縮放不重建整張路網。
+    let previousTrafficDetailMode = map.getZoom() >= 10;
+    let previousSupplementaryMarkerMode = map.getZoom() >= 11;
+    map.on('zoomend', () => {
+      const detailMode = map.getZoom() >= 10;
+      const markerMode = map.getZoom() >= 11;
+      if (detailMode !== previousTrafficDetailMode) {
+        previousTrafficDetailMode = detailMode;
+        renderTrafficNetwork();
+      }
+      if (markerMode !== previousSupplementaryMarkerMode) {
+        previousSupplementaryMarkerMode = markerMode;
+        renderCCTV();
+        renderParking();
+      }
+    });
 
     // =========================================================================
     // 6. TDX 全台官方路況資料載入（不再使用隨機模擬車速）
