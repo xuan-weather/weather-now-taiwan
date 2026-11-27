@@ -118,22 +118,30 @@ def extract_items(payload):
                 return found
     return []
 
+def find_feed_metadata(payload):
+    metadata = {"updateTime": "", "authorityCode": ""}
+    def walk(node):
+        if isinstance(node, dict):
+            if not metadata["updateTime"]:
+                value = node.get("UpdateTime") or node.get("updateTime")
+                if isinstance(value, str) and value.strip():
+                    metadata["updateTime"] = value.strip()
+            if not metadata["authorityCode"]:
+                value = node.get("AuthorityCode") or node.get("authorityCode")
+                if isinstance(value, str) and value.strip():
+                    metadata["authorityCode"] = value.strip()
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                if isinstance(value, (dict, list)):
+                    walk(value)
+    walk(payload)
+    return metadata
+
 def find_feed_update_time(payload):
-    if isinstance(payload, dict):
-        for key in ("UpdateTime", "updateTime"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        for value in payload.values():
-            found = find_feed_update_time(value) if isinstance(value, (dict, list)) else ""
-            if found:
-                return found
-    elif isinstance(payload, list):
-        for value in payload:
-            found = find_feed_update_time(value) if isinstance(value, (dict, list)) else ""
-            if found:
-                return found
-    return ""
+    return find_feed_metadata(payload)["updateTime"]
 
 def rows(path, bearer):
     result, skip, top = [], 0, 1000
@@ -145,11 +153,14 @@ def rows(path, bearer):
             "Accept-Encoding":"gzip"
         })
         batch = extract_items(payload)
-        feed_time = find_feed_update_time(payload)
-        if feed_time:
-            for item in batch:
-                if isinstance(item, dict) and not any(item.get(key) for key in ("DataCollectTime", "SrcUpdateTime", "UpdateTime", "updateTime")):
+        feed_metadata = find_feed_metadata(payload)
+        feed_time = feed_metadata["updateTime"]
+        for item in batch:
+            if isinstance(item, dict):
+                if feed_time and not any(item.get(key) for key in ("DataCollectTime", "SrcUpdateTime", "UpdateTime", "updateTime")):
                     item["_FeedUpdateTime"] = feed_time
+                if feed_metadata["authorityCode"] and not item.get("AuthorityCode"):
+                    item["_FeedAuthorityCode"] = feed_metadata["authorityCode"]
         result.extend(batch)
         if len(batch) < top:
             return result
@@ -253,16 +264,21 @@ CONGESTION_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 def find_congestion_groups(payload):
     found = []
-    def walk(node):
+    def walk(node, inherited_authority=""):
         if isinstance(node, dict):
+            authority = str(node.get("AuthorityCode") or node.get("authorityCode") or inherited_authority).strip()
             if "CongestionLevelID" in node and ("Levels" in node or "CongestionLevelName" in node):
-                found.append(node)
+                group = dict(node)
+                if authority:
+                    group["_AuthorityCode"] = authority
+                found.append(group)
             for value in node.values():
                 if isinstance(value, (dict, list)):
-                    walk(value)
+                    walk(value, authority)
         elif isinstance(node, list):
             for value in node:
-                walk(value)
+                if isinstance(value, (dict, list)):
+                    walk(value, inherited_authority)
     walk(payload)
     return found
 
@@ -319,11 +335,17 @@ def build_definition_index(groups):
     for group in groups:
         group_id = str(group.get("CongestionLevelID", "")).strip()
         if group_id:
-            index[group_id] = {
+            definition = {
+                "authorityCode": group.get("_AuthorityCode", ""),
+                "groupId": group_id,
                 "groupName": group.get("CongestionLevelName", ""),
                 "measureIndex": group.get("MeasureIndex", ""),
                 "levels": group.get("Levels", {}).get("Level", []) if isinstance(group.get("Levels"), dict) else group.get("Levels", [])
             }
+            authority = str(group.get("_AuthorityCode", "")).strip()
+            if authority:
+                index[f"{authority}:{group_id}"] = definition
+            index[group_id] = definition
     return index
 
 def build_segments(live_rows, shape_rows, region, label, source, section_rows=None, level_index=None):
@@ -353,7 +375,10 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
             "speed":speed,
             "congestionLevel":item.get("CongestionLevel"),
             "congestionLevelId":item.get("CongestionLevelID"),
-            "congestionDefinition":(level_index or {}).get(str(item.get("CongestionLevelID", "")).strip()),
+            "authorityCode":first_text(item,("AuthorityCode","_FeedAuthorityCode"),""),
+            "congestionDefinition":(level_index or {}).get(
+                f"{first_text(item,('AuthorityCode','_FeedAuthorityCode'),'')}:{str(item.get('CongestionLevelID','')).strip()}"
+            ) or (level_index or {}).get(str(item.get("CongestionLevelID", "")).strip()),
             "coords":coords,
             "sourceLabel":source,
             "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime","_FeedUpdateTime"),"")
