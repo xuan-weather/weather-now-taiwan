@@ -14,15 +14,17 @@ permissions:
   contents: write
 
 concurrency:
-  group: tdx-supplementary-layers-v2
+  group: tdx-api-global
   cancel-in-progress: false
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
+      # TDX rate limits are shared by the client credentials; never run layer fetches in parallel.
+      max-parallel: 1
       matrix:
         include:
           - layer: incidents
