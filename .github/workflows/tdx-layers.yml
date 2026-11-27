@@ -1,0 +1,93 @@
+name: Update TDX Supplementary Map Layers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/fetch_tdx_layers.py"
+      - ".github/workflows/tdx-layers.yml"
+  schedule:
+    - cron: "*/20 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tdx-supplementary-layers
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: incidents
+            file: tdx-incidents.json
+          - layer: cctv
+            file: tdx-cctv.json
+          - layer: parking
+            file: tdx-parking.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch official \${{ matrix.layer }} data
+        env:
+          TDX_CLIENT_ID: \${{ secrets.TDX_CLIENT_ID }}
+          TDX_CLIENT_SECRET: \${{ secrets.TDX_CLIENT_SECRET }}
+        run: python scripts/fetch_tdx_layers.py --layer "\${{ matrix.layer }}"
+      - name: Upload \${{ matrix.layer }} snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdx-\${{ matrix.layer }}
+          path: data/\${{ matrix.file }}
+          if-no-files-found: warn
+          retention-days: 2
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: fetch
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download available layer snapshots
+        uses: actions/download-artifact@v4
+        with:
+          path: layer-artifacts
+          pattern: tdx-*
+          merge-multiple: true
+      - name: Commit successful layer snapshots
+        run: |
+          set -euo pipefail
+          if [ ! -d layer-artifacts ] || [ -z "$(find layer-artifacts -maxdepth 1 -name 'tdx-*.json' -print -quit)" ]; then
+            echo "No layer snapshots were produced; preserving existing published data."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p data
+          cp layer-artifacts/tdx-*.json data/ 2>/dev/null || true
+          git add data/tdx-incidents.json data/tdx-cctv.json data/tdx-parking.json
+          if git diff --cached --quiet; then
+            echo "No supplementary layer changes."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            git commit -m "Update independent TDX map layers" || exit 0
+            if git push origin HEAD:main; then
+              echo "Supplementary layers published."
+              exit 0
+            fi
+            echo "Push raced with another main update; syncing before retry."
+            git fetch origin main
+            git reset --soft origin/main
+            sleep 2
+          done
+          echo "Unable to publish supplementary layers after 3 attempts."
+          exit 1
