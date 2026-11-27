@@ -4,6 +4,8 @@ import json, os, re, sys, time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
 
 CLIENT_ID = os.environ.get("TDX_CLIENT_ID", "").strip()
 CLIENT_SECRET = os.environ.get("TDX_CLIENT_SECRET", "").strip()
@@ -29,8 +31,18 @@ CITIES = [
 
 def get_json(url, headers=None, body=None):
     req = Request(url, headers=headers or {}, data=body, method="POST" if body is not None else "GET")
-    with urlopen(req, timeout=50) as response:
-        return json.loads(response.read().decode("utf-8-sig"))
+    for attempt in range(6):
+        try:
+            with urlopen(req, timeout=50) as response:
+                return json.loads(response.read().decode("utf-8-sig"))
+        except HTTPError as exc:
+            if exc.code == 429 and attempt < 5:
+                wait = min(60, 3 * (2 ** attempt))
+                print(f"[RATE LIMIT] HTTP 429; retry in {wait}s", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            raise RuntimeError(f"HTTP {exc.code} for {url}: {detail}") from exc
 
 def token():
     body = urlencode({"grant_type":"client_credentials","client_id":CLIENT_ID,"client_secret":CLIENT_SECRET}).encode()
@@ -39,20 +51,43 @@ def token():
         raise RuntimeError("TDX OAuth did not return an access_token")
     return result["access_token"]
 
+def extract_items(payload):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    if payload.get("success") is False:
+        error = payload.get("error") or {}
+        raise RuntimeError(f"TDX returned {error.get('message') or error or 'success=false'}")
+    # TDX 路況資料常以 LiveTrafficList/LiveTraffic、SectionShapeList/SectionShapes 包裝。
+    preferred = ("LiveTraffic", "SectionShape", "LiveTraffics", "SectionShapes", "value", "data", "Data")
+    for key in preferred:
+        if key in payload:
+            found = extract_items(payload[key])
+            if found:
+                return found
+    for value in payload.values():
+        if isinstance(value, (dict, list)):
+            found = extract_items(value)
+            if found:
+                return found
+    return []
+
 def rows(path, bearer):
     result, skip, top = [], 0, 1000
     while True:
         query = urlencode({"$format":"JSON","$top":top,"$skip":skip})
-        payload = get_json(f"{API_ROOT}/{path}?{query}", {"Authorization":f"Bearer {bearer}","Accept":"application/json"})
-        if isinstance(payload, dict):
-            payload = payload.get("value", payload.get("data", payload.get("Data", [])))
-        if not isinstance(payload, list):
-            raise RuntimeError(f"Unexpected TDX response for {path}")
-        result.extend(payload)
-        if len(payload) < top:
+        payload = get_json(f"{API_ROOT}/{path}?{query}", {
+            "Authorization":f"Bearer {bearer}",
+            "Accept":"application/json",
+            "Accept-Encoding":"gzip"
+        })
+        batch = extract_items(payload)
+        result.extend(batch)
+        if len(batch) < top:
             return result
-        skip += len(payload)
-        time.sleep(0.12)
+        skip += len(batch)
+        time.sleep(0.6)
 
 def section_id(item):
     for key in ("SectionID","SectionId","sectionID","sectionId"):
@@ -101,13 +136,18 @@ def first_text(item, keys, fallback):
             return value.strip()
     return fallback
 
-def build_segments(live_rows, shape_rows, region, label, source):
+def build_segments(live_rows, shape_rows, region, label, source, section_rows=None):
     shape_by_id={}
     for item in shape_rows:
         sid=section_id(item)
         coords=geometry_points(item)
         if sid and coords:
             shape_by_id[sid]=coords
+    name_by_id={}
+    for item in (section_rows or []):
+        sid=section_id(item)
+        if sid:
+            name_by_id[sid]=first_text(item,("SectionName","RoadName","RoadNameZh","Name"),f"{label} 路段 {sid}")
     output=[]
     for item in live_rows:
         sid=section_id(item)
@@ -117,7 +157,7 @@ def build_segments(live_rows, shape_rows, region, label, source):
             continue
         output.append({
             "id":f"{region}:{sid}",
-            "name":first_text(item,("SectionName","RoadName","RoadNameZh","Name"),f"{label} 路段 {sid}"),
+            "name":first_text(item,("SectionName","RoadName","RoadNameZh","Name"),name_by_id.get(sid,f"{label} 路段 {sid}")),
             "region":region,
             "regionLabel":label,
             "speed":speed,
@@ -131,23 +171,26 @@ def main():
     bearer=token()
     all_segments=[]
     stats=[]
-    sources=[(f"Road/Traffic/Live/City/{city}",f"Road/Traffic/SectionShape/City/{city}",label,region,"縣市") for city,label,region in CITIES]
+    sources=[(f"Road/Traffic/Live/City/{city}",f"Road/Traffic/SectionShape/City/{city}",f"Road/Traffic/Section/City/{city}",label,region,"縣市") for city,label,region in CITIES]
     sources += [
-        ("Road/Traffic/Live/Highway","Road/Traffic/SectionShape/Highway","全台省道","highway","省道"),
-        ("Road/Traffic/Live/Freeway","Road/Traffic/SectionShape/Freeway","全台國道","freeway","國道")
+        ("Road/Traffic/Live/Highway","Road/Traffic/SectionShape/Highway","Road/Traffic/Section/Highway","全台省道","highway","省道"),
+        ("Road/Traffic/Live/Freeway","Road/Traffic/SectionShape/Freeway","Road/Traffic/Section/Freeway","全台國道","freeway","國道")
     ]
-    for live_path,shape_path,label,region,kind in sources:
+    for live_path,shape_path,section_path,label,region,kind in sources:
         try:
             live=rows(live_path,bearer)
+            time.sleep(0.6)
             shapes=rows(shape_path,bearer)
-            segments=build_segments(live,shapes,region,label,f"TDX {kind}即時路況")
+            time.sleep(0.6)
+            sections=rows(section_path,bearer)
+            segments=build_segments(live,shapes,region,label,f"TDX {kind}即時路況",sections)
             all_segments.extend(segments)
-            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
-            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)}")
+            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"sectionRecords":len(sections),"mappedSegments":len(segments),"ok":True})
+            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} sections={len(sections)} mapped={len(segments)}")
         except Exception as exc:
-            stats.append({"name":label,"ok":False,"error":str(exc)[:200]})
+            stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
-        time.sleep(0.12)
+        time.sleep(1.2)
     if not all_segments:
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
     payload={
