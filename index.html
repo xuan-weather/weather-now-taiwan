@@ -661,18 +661,16 @@
           const definitionLevels = Array.isArray(seg.congestionDefinition?.levels)
             ? seg.congestionDefinition.levels : [];
           const matchedDefinition = definitionLevels.find(item => Number(item.Level) === rawOfficialLevel);
-          const officialLevelName = matchedDefinition?.LevelName || null;
-          const officialLevel = matchedDefinition && Number.isInteger(rawOfficialLevel) && rawOfficialLevel >= 1 && rawOfficialLevel <= 5
-            ? rawOfficialLevel : (Number.isInteger(rawOfficialLevel) && rawOfficialLevel >= 1 && rawOfficialLevel <= 5 && !seg.congestionLevelId ? rawOfficialLevel : null);
-          const isFreeway = String(seg.region || '').toLowerCase() === 'freeway' ||
-            String(seg.sourceLabel || '').includes('國道');
-          // TDX 官方壅塞級別優先；僅國道在缺少級別時採用高速公路資訊網的車速區間。
-          let resolvedLevel = officialLevel;
-          let levelSource = officialLevel !== null ? 'official' : 'unknown';
-          if (resolvedLevel === null && isFreeway && speed > 0) {
-            resolvedLevel = speed >= 80 ? 1 : speed >= 60 ? 2 : speed >= 40 ? 3 : speed >= 20 ? 4 : 5;
-            levelSource = 'freeway-speed-fallback';
-          }
+          const standardLevelNames = {
+            1: '順暢', 2: '車多', 3: '壅塞', 4: '嚴重壅塞', 5: '極度壅塞'
+          };
+          // TDX LiveTraffic.CongestionLevel 本身就是主管機關發布的最終級別；
+          // 門檻定義用來驗證組別與量測基準，不應因定義快取缺漏而丟棄有效官方級別。
+          const officialLevel = Number.isInteger(rawOfficialLevel) && rawOfficialLevel >= 1 && rawOfficialLevel <= 5
+            ? rawOfficialLevel : null;
+          const officialLevelName = matchedDefinition?.LevelName || standardLevelNames[officialLevel] || null;
+          const resolvedLevel = officialLevel;
+          const levelSource = officialLevel !== null ? 'tdx-live-official' : 'unknown';
           latestByRoad.set(key, {
             ...seg,
             _trafficTimestamp: timestamp,
@@ -681,6 +679,8 @@
             _officialLevelName: officialLevelName,
             _congestionGroupName: seg.congestionDefinition?.groupName || null,
             _levelMeasure: seg.congestionDefinition?.measureIndex || null,
+            _levelAuthority: seg.authorityCode || seg.congestionDefinition?.authorityCode || null,
+            _levelGroupId: seg.congestionLevelId || null,
             _levelSource: levelSource,
             _stale: Number.isFinite(timestamp) && (
               (Date.now() - timestamp > TRAFFIC_STALE_AFTER_MS) ||
