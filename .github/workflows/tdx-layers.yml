@@ -66,28 +66,28 @@ jobs:
       - name: Commit successful layer snapshots
         run: |
           set -euo pipefail
-          if [ ! -d layer-artifacts ] || [ -z "$(find layer-artifacts -maxdepth 1 -name 'tdx-*.json' -print -quit)" ]; then
+          mkdir -p layer-artifacts data
+          if [ -z "$(find layer-artifacts -maxdepth 1 -name 'tdx-*.json' -print -quit)" ]; then
             echo "No layer snapshots were produced; preserving existing published data."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          mkdir -p data
-          cp layer-artifacts/tdx-*.json data/ 2>/dev/null || true
-          git add data/tdx-*.json
-          if git diff --cached --quiet; then
-            echo "No supplementary layer changes."
-            exit 0
-          fi
           for attempt in 1 2 3; do
-            git commit -m "Update independent TDX map layers" || exit 0
+            git fetch origin main
+            git reset --hard origin/main
+            cp layer-artifacts/tdx-*.json data/ 2>/dev/null || true
+            git add data/tdx-incidents.json data/tdx-cctv.json data/tdx-parking.json
+            if git diff --cached --quiet; then
+              echo "No supplementary layer changes."
+              exit 0
+            fi
+            git commit -m "Update independent TDX map layers"
             if git push origin HEAD:main; then
               echo "Supplementary layers published."
               exit 0
             fi
-            echo "Push raced with another main update; syncing before retry."
-            git fetch origin main
-            git reset --soft origin/main
+            echo "Push raced with another main update; retrying from latest main."
             sleep 2
           done
           echo "Unable to publish supplementary layers after 3 attempts."
