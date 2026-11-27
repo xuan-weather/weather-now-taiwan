@@ -1184,6 +1184,7 @@
       renderCCTV();
       renderParking();
       loadSupplementalTrafficLayers();
+      setInterval(loadSupplementalTrafficLayers, 5 * 60 * 1000);
       updateClockLabel();
       loadTdxTrafficData(false);
       autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
