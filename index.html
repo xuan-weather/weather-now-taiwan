@@ -596,11 +596,12 @@
       return Number.isFinite(parsed) ? parsed : NaN;
     }
 
-    function getSegmentTimestamp(seg, generatedAt) {
+    function getSegmentTimestamp(seg) {
+      // 不以 JSON 產生時間代替路段觀測時間，避免舊車速被誤認為最新。
       const candidates = [
         seg.updateTime, seg.UpdateTime, seg.updatedAt, seg.UpdatedAt,
         seg.dataTime, seg.DataTime, seg.timestamp, seg.Timestamp,
-        seg.observedAt, seg.ObservedAt, generatedAt
+        seg.observedAt, seg.ObservedAt
       ];
       for (const value of candidates) {
         const parsed = parseTrafficTimestamp(value);
@@ -610,17 +611,18 @@
     }
 
     function getSegmentIdentity(seg) {
-      const stableId = seg.segmentId ?? seg.SegmentID ?? seg.linkId ??
-        seg.LinkID ?? seg.roadSegmentId ?? seg.RoadSegmentID ?? seg.id;
+      // 優先採用資料產生器提供的全域路段 ID，不因資料來源標籤不同而重複繪製。
+      const stableId = seg.id ?? seg.segmentId ?? seg.SegmentID ?? seg.linkId ??
+        seg.LinkID ?? seg.roadSegmentId ?? seg.RoadSegmentID;
       if (stableId !== undefined && stableId !== null && String(stableId).trim()) {
-        return `${seg.sourceLabel || seg.source || 'TDX'}:${String(stableId).trim()}`;
+        return String(stableId).trim();
       }
       const coordsKey = Array.isArray(seg.coords)
         ? seg.coords.map(point => Array.isArray(point)
           ? point.map(n => Number(n).toFixed(5)).join(',')
           : '').join(';')
         : '';
-      return `${seg.sourceLabel || seg.source || 'TDX'}:${String(seg.roadName || seg.name || '').trim()}:${String(seg.direction || '')}:${coordsKey}`;
+      return `${String(seg.region || '')}:${String(seg.roadName || seg.name || '').trim()}:${String(seg.direction || '')}:${coordsKey}`;
     }
 
     // 同一路段只保留時間最新的一筆，避免不同批次重複疊線。
@@ -630,7 +632,7 @@
         if (!seg || !Array.isArray(seg.coords) || seg.coords.length < 2) continue;
         const speed = Number(seg.speed);
         if (!Number.isFinite(speed) || speed < 0 || speed > MAX_REASONABLE_SPEED_KMH) continue;
-        const timestamp = getSegmentTimestamp(seg, generatedAt);
+        const timestamp = getSegmentTimestamp(seg);
         const key = getSegmentIdentity(seg);
         const previous = latestByRoad.get(key);
         if (!previous ||
@@ -705,7 +707,7 @@
             </div>
             <div class="text-[10px] text-slate-400 mt-2">路段編號：${seg.id ?? seg.segmentId ?? '未提供'}</div>
             <div class="text-[10px] text-slate-400">資料時間：${timestampText}</div>
-            ${seg._stale ? '<div class="text-[10px] text-slate-300 mt-1">資料超過 30 分鐘，已改以灰色標示，不列入即時壅塞判讀</div>' : ''}
+            ${seg._stale ? '<div class="text-[10px] text-slate-300 mt-1">資料超過 30 分鐘或缺少觀測時間，已改以灰色標示，不列入即時壅塞判讀</div>' : ''}
           </div>
         `;
         line.bindPopup(popupHtml);
