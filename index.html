@@ -257,7 +257,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
             <div>
-              <div class="font-medium">即時路況路網</div>
+              <div class="flex items-center justify-between gap-3"><span class="font-medium">即時路況路網</span><span id="count-traffic" class="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold tabular-nums text-emerald-300">— 筆</span></div>
               <div class="text-[10px] text-slate-400">國道、快速道路與市區幹道車速</div>
             </div>
           </div>
@@ -269,7 +269,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]"></span>
             <div>
-              <div class="font-medium">事故與施工通報</div>
+              <div class="flex items-center justify-between gap-3"><span class="font-medium">事故與施工通報</span><span id="count-incidents" class="shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold tabular-nums text-amber-300">— 件</span></div>
               <div class="text-[10px] text-slate-400">車禍、道路施工、散落物與管制</div>
             </div>
           </div>
@@ -281,7 +281,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf8]"></span>
             <div>
-              <div class="font-medium">即時路況監視器 (CCTV)</div>
+              <div class="flex items-center justify-between gap-3"><span class="font-medium">即時路況監視器 (CCTV)</span><span id="count-cctv" class="shrink-0 rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] font-bold tabular-nums text-sky-300">— 台</span></div>
               <div class="text-[10px] text-slate-400">重要交流道與路口即時影像</div>
             </div>
           </div>
@@ -293,7 +293,7 @@
           <div class="flex items-center gap-2.5">
             <span class="w-2.5 h-2.5 rounded-full bg-indigo-400 shadow-[0_0_8px_#818cf8]"></span>
             <div>
-              <div class="font-medium">停車場即時空位</div>
+              <div class="flex items-center justify-between gap-3"><span class="font-medium">停車場即時空位</span><span id="count-parking" class="shrink-0 rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold tabular-nums text-indigo-300">— 場</span></div>
               <div class="text-[10px] text-slate-400">公有與立體停車場剩餘格位</div>
             </div>
           </div>
@@ -540,6 +540,20 @@
     // 4. 路況顏色與繪製引擎
     // =========================================================================
     const polylineMap = {};
+
+    // 圖層面板顯示目前成功載入的官方資料筆數。
+    function updateLayerCounts() {
+      const counts = [
+        ['count-traffic', roadSegments.length, '筆'],
+        ['count-incidents', incidentsData.length, '件'],
+        ['count-cctv', cctvData.length, '台'],
+        ['count-parking', parkingData.length, '場']
+      ];
+      counts.forEach(([id, value, unit]) => {
+        const node = document.getElementById(id);
+        if (node) node.textContent = Number(value || 0).toLocaleString('zh-TW') + ' ' + unit;
+      });
+    }
 
     const TRAFFIC_STALE_AFTER_MS = 30 * 60 * 1000; // 超過 30 分鐘視為過期
     const MAX_REASONABLE_SPEED_KMH = 200;
@@ -871,6 +885,7 @@
           return;
         }
         assign(payload[key]);
+        updateLayerCounts();
         render();
         console.info('[TDX layer loaded]', file, payload[key].length, payload.generatedAt);
       } catch (error) {
@@ -998,6 +1013,7 @@
         }
 
         roadSegments = normalizeTrafficSegments(payload.segments, payload.generatedAt);
+        updateLayerCounts();
         renderTrafficNetwork();
         lastAcceptedTrafficGeneratedAt = snapshotTime;
         // officialDataAt 是來源觀測時間；generatedAt 只供舊版 JSON 相容。
@@ -1321,6 +1337,7 @@
       renderIncidents();
       renderCCTV();
       renderParking();
+      updateLayerCounts();
       loadSupplementalTrafficLayers();
       setInterval(loadSupplementalTrafficLayers, 5 * 60 * 1000);
       updateClockLabel();
