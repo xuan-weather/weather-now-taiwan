@@ -630,9 +630,13 @@
             (Number.isFinite(timestamp) &&
               (!Number.isFinite(previous._trafficTimestamp) || timestamp >= previous._trafficTimestamp)) ||
             (!Number.isFinite(timestamp) && !Number.isFinite(previous._trafficTimestamp))) {
-          const officialLevelValue = Number(seg.congestionLevel ?? seg.CongestionLevel);
-          const officialLevel = Number.isInteger(officialLevelValue) && officialLevelValue >= 1 && officialLevelValue <= 5
-            ? officialLevelValue : null;
+          const rawOfficialLevel = Number(seg.congestionLevel ?? seg.CongestionLevel);
+          const definitionLevels = Array.isArray(seg.congestionDefinition?.levels)
+            ? seg.congestionDefinition.levels : [];
+          const matchedDefinition = definitionLevels.find(item => Number(item.Level) === rawOfficialLevel);
+          const officialLevelName = matchedDefinition?.LevelName || null;
+          const officialLevel = matchedDefinition && Number.isInteger(rawOfficialLevel) && rawOfficialLevel >= 1 && rawOfficialLevel <= 5
+            ? rawOfficialLevel : (Number.isInteger(rawOfficialLevel) && rawOfficialLevel >= 1 && rawOfficialLevel <= 5 && !seg.congestionLevelId ? rawOfficialLevel : null);
           const isFreeway = String(seg.region || '').toLowerCase() === 'freeway' ||
             String(seg.sourceLabel || '').includes('國道');
           // TDX 官方壅塞級別優先；僅國道在缺少級別時採用高速公路資訊網的車速區間。
@@ -647,6 +651,9 @@
             _trafficTimestamp: timestamp,
             _speedValid: speed >= 0,
             _congestionLevel: resolvedLevel,
+            _officialLevelName: officialLevelName,
+            _congestionGroupName: seg.congestionDefinition?.groupName || null,
+            _levelMeasure: seg.congestionDefinition?.measureIndex || null,
             _levelSource: levelSource,
             _stale: Number.isFinite(timestamp) && (
               (Date.now() - timestamp > TRAFFIC_STALE_AFTER_MS) ||
