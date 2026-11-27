@@ -396,7 +396,10 @@
       <div class="flex items-center justify-between gap-3 pt-1.5 border-t border-white/10 text-[10px] text-slate-300">
         <div class="flex items-center gap-1.5">
           <span id="live-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>更新：<span id="last-update-time" class="font-mono text-white">--:--:--</span></span>
+          <span class="flex flex-col leading-tight gap-0.5">
+            <span>官方資料：<span id="last-update-time" class="font-mono text-white">--:--:--</span></span>
+            <span class="text-[9px] text-slate-400">網站檢查：<span id="last-check-time" class="font-mono">--:--:--</span></span>
+          </span>
         </div>
         <div class="flex items-center gap-2">
           <button onclick="simulateTrafficUpdate(true)" class="hover:text-sky-400 flex items-center gap-0.5 transition" title="立即刷新路況">
@@ -952,12 +955,21 @@
     // =========================================================================
     let autoSimTimer = null;
     let trafficLoading = false;
+    let lastAcceptedTrafficGeneratedAt = 0;
 
-    function updateClockLabel(value) {
-      const date = value ? new Date(value) : new Date();
+    function formatTrafficClock(value) {
+      if (!value) return '資料時間未知';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime())
+        ? '資料時間未知'
+        : date.toLocaleTimeString('zh-TW', { hour12: false });
+    }
+
+    function updateClockLabel(officialValue) {
       document.getElementById('last-update-time').textContent =
-        Number.isNaN(date.getTime()) ? '資料時間未知' :
-        date.toLocaleTimeString('zh-TW', { hour12: false });
+        formatTrafficClock(officialValue);
+      document.getElementById('last-check-time').textContent =
+        new Date().toLocaleTimeString('zh-TW', { hour12: false });
     }
 
     async function loadTdxTrafficData(manual = false) {
@@ -969,9 +981,25 @@
         if (!response.ok) throw new Error('官方路況資料尚未發布（HTTP ' + response.status + '）');
         const payload = await response.json();
         if (!payload || !Array.isArray(payload.segments)) throw new Error('TDX 路況資料格式不正確');
+
+        const snapshotTime = Date.parse(payload.generatedAt || '');
+        if (!Number.isFinite(snapshotTime)) throw new Error('路況快照缺少有效的產生時間');
+
+        // CDN 或部署延遲若送回較舊 JSON，不覆蓋目前已載入的較新資料。
+        if (snapshotTime < lastAcceptedTrafficGeneratedAt) {
+          updateClockLabel(payload.officialDataAt || payload.generatedAt);
+          console.warn('[TDX traffic] ignored older snapshot', payload.generatedAt);
+          if (manual) showToast('收到較舊的路況快照，已保留目前較新的資料');
+          return;
+        }
+
         roadSegments = normalizeTrafficSegments(payload.segments, payload.generatedAt);
         renderTrafficNetwork();
-        updateClockLabel(payload.generatedAt);
+        lastAcceptedTrafficGeneratedAt = snapshotTime;
+        // officialDataAt 是來源觀測時間；generatedAt 只供舊版 JSON 相容。
+        const officialTime = Object.prototype.hasOwnProperty.call(payload, 'officialDataAt')
+          ? payload.officialDataAt : payload.generatedAt;
+        updateClockLabel(officialTime);
         dot.classList.add('bg-emerald-400');
         dot.classList.remove('bg-slate-500', 'bg-rose-500');
         if (manual) {
