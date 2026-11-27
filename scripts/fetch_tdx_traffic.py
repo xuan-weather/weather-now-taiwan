@@ -16,20 +16,20 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 8.0
+MIN_REQUEST_INTERVAL = 12.0
 _last_request_at = 0.0
 CITIES = [
-    ("Taipei","臺北市","taipei"),("NewTaipei","新北市","newtaipei"),
-    ("Taoyuan","桃園市","taoyuan"),("Taichung","臺中市","taichung"),
-    ("Tainan","臺南市","tainan"),("Kaohsiung","高雄市","kaohsiung"),
-    ("Keelung","基隆市","keelung"),("Hsinchu","新竹市","hsinchu_city"),
-    ("HsinchuCounty","新竹縣","hsinchu_county"),("MiaoliCounty","苗栗縣","miaoli"),
-    ("ChanghuaCounty","彰化縣","changhua"),("NantouCounty","南投縣","nantou"),
-    ("YunlinCounty","雲林縣","yunlin"),("ChiayiCounty","嘉義縣","chiayi_county"),
-    ("Chiayi","嘉義市","chiayi_city"),("PingtungCounty","屏東縣","pingtung"),
-    ("YilanCounty","宜蘭縣","yilan"),("HualienCounty","花蓮縣","hualien"),
-    ("TaitungCounty","臺東縣","taitung"),("PenghuCounty","澎湖縣","penghu"),
-    ("KinmenCounty","金門縣","kinmen"),("LienchiangCounty","連江縣","lienchiang")
+    # 依 TDX API 回傳的 City enum，僅查詢此端點實際接受的縣市代碼。
+    ("YilanCounty","宜蘭縣","yilan"),
+    ("MiaoliCounty","苗栗縣","miaoli"),
+    ("ChanghuaCounty","彰化縣","changhua"),
+    ("YunlinCounty","雲林縣","yunlin"),
+    ("PingtungCounty","屏東縣","pingtung"),
+    ("Keelung","基隆市","keelung"),
+    ("Taipei","臺北市","taipei"),
+    ("Taichung","臺中市","taichung"),
+    ("Tainan","臺南市","tainan"),
+    ("Taoyuan","桃園市","taoyuan")
 ]
 
 def decode_response(raw, headers=None):
