@@ -452,18 +452,26 @@
   </div>
 
   <script>
+    // Darken only the dark OSM base tiles; overlays and road-status markers remain unchanged.
+    const darkTileStyle = document.createElement('style');
+    darkTileStyle.textContent = '.xuan-dark-osm-tiles { filter: brightness(.62) invert(1) contrast(3) hue-rotate(200deg) saturate(.35) brightness(.72); }';
+    document.head.appendChild(darkTileStyle);
+
     // =========================================================================
     // 1. 初始化地圖與底圖圖層
     // =========================================================================
     const baseLayers = {
-      dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-        subdomains: 'abcd',
-        maxZoom: 19
+      // Use the public OpenStreetMap tile service to avoid CARTO API-key
+      // interstitial tiles ("API KEY REQUIRED") on mobile browsers.
+      dark: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        subdomains: 'abc',
+        maxZoom: 19,
+        className: 'xuan-dark-osm-tiles'
       }),
-      light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-        subdomains: 'abcd',
+      light: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        subdomains: 'abc',
         maxZoom: 19
       }),
       satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
