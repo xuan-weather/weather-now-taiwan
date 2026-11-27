@@ -351,25 +351,16 @@
   ========================================================= -->
   <div class="fixed bottom-4 left-3 sm:bottom-5 sm:left-4 z-[1000] pointer-events-none max-w-[calc(100vw-80px)]">
     <div id="legend-panel" class="glass-panel rounded-2xl px-3 py-2.5 pointer-events-auto flex flex-col gap-2">
-      <!-- 顏色車速對照 -->
+      <!-- 官方壅塞級別圖例 -->
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium">
-        <div class="flex items-center gap-1.5">
-          <span class="w-3 h-1.5 rounded-full bg-[#10b981] shadow-[0_0_6px_#10b981]"></span>
-          <span>順暢 <span class="text-slate-400 text-[10px]">&gt;60</span></span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="w-3 h-1.5 rounded-full bg-[#eab308] shadow-[0_0_6px_#eab308]"></span>
-          <span>車多 <span class="text-slate-400 text-[10px]">40-60</span></span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="w-3 h-1.5 rounded-full bg-[#f97316] shadow-[0_0_6px_#f97316]"></span>
-          <span>壅塞 <span class="text-slate-400 text-[10px]">20-40</span></span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="w-3 h-1.5 rounded-full bg-[#ef4444] shadow-[0_0_6px_#ef4444]"></span>
-          <span>嚴重 <span class="text-slate-400 text-[10px]">&lt;20 km/h</span></span>
-        </div>
+        <div class="flex items-center gap-1.5"><span class="w-3 h-1.5 rounded-full bg-[#10b981]"></span><span>順暢</span></div>
+        <div class="flex items-center gap-1.5"><span class="w-3 h-1.5 rounded-full bg-[#eab308]"></span><span>車多</span></div>
+        <div class="flex items-center gap-1.5"><span class="w-3 h-1.5 rounded-full bg-[#f97316]"></span><span>壅塞</span></div>
+        <div class="flex items-center gap-1.5"><span class="w-3 h-1.5 rounded-full bg-[#ef4444]"></span><span>嚴重</span></div>
+        <div class="flex items-center gap-1.5"><span class="w-3 h-1.5 rounded-full bg-[#b91c1c]"></span><span>極度</span></div>
+        <div class="flex items-center gap-1.5"><span class="w-3 h-1.5 rounded-full bg-[#94a3b8]"></span><span>待確認/過期</span></div>
       </div>
+      <div class="text-[9px] text-slate-400">優先採用主管機關壅塞級別；國道缺少級別時才依車速區間判讀</div>
 
       <!-- 更新時間與自動模擬開關 -->
       <div class="flex items-center justify-between gap-3 pt-1.5 border-t border-white/10 text-[10px] text-slate-300">
@@ -639,10 +630,24 @@
             (Number.isFinite(timestamp) &&
               (!Number.isFinite(previous._trafficTimestamp) || timestamp >= previous._trafficTimestamp)) ||
             (!Number.isFinite(timestamp) && !Number.isFinite(previous._trafficTimestamp))) {
+          const officialLevelValue = Number(seg.congestionLevel ?? seg.CongestionLevel);
+          const officialLevel = Number.isInteger(officialLevelValue) && officialLevelValue >= 1 && officialLevelValue <= 5
+            ? officialLevelValue : null;
+          const isFreeway = String(seg.region || '').toLowerCase() === 'freeway' ||
+            String(seg.sourceLabel || '').includes('國道');
+          // TDX 官方壅塞級別優先；僅國道在缺少級別時採用高速公路資訊網的車速區間。
+          let resolvedLevel = officialLevel;
+          let levelSource = officialLevel !== null ? 'official' : 'unknown';
+          if (resolvedLevel === null && isFreeway && speed > 0) {
+            resolvedLevel = speed >= 80 ? 1 : speed >= 60 ? 2 : speed >= 40 ? 3 : speed >= 20 ? 4 : 5;
+            levelSource = 'freeway-speed-fallback';
+          }
           latestByRoad.set(key, {
             ...seg,
             _trafficTimestamp: timestamp,
             _speedValid: speed > 0,
+            _congestionLevel: resolvedLevel,
+            _levelSource: levelSource,
             _stale: !Number.isFinite(timestamp) ||
               (Date.now() - timestamp > TRAFFIC_STALE_AFTER_MS) ||
               (timestamp - Date.now() > 5 * 60 * 1000)
@@ -652,23 +657,24 @@
       return Array.from(latestByRoad.values());
     }
 
-    function getSpeedStyle(speed, stale = false, speedValid = true) {
-      if (stale || !speedValid) {
-        return {
-          color: '#94a3b8',
-          label: stale ? '資料過期' : '車速待確認',
-          badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40'
-        };
+    function getSpeedStyle(seg) {
+      if (seg._stale) {
+        return { color: '#94a3b8', label: '資料過期', badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40' };
       }
-      if (speed > 60) {
-        return { color: '#10b981', label: '順暢', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
-      } else if (speed >= 40) {
-        return { color: '#eab308', label: '車多', badgeClass: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40' };
-      } else if (speed >= 20) {
-        return { color: '#f97316', label: '壅塞', badgeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/40' };
-      } else {
-        return { color: '#ef4444', label: '嚴重壅塞', badgeClass: 'bg-red-500/20 text-red-300 border-red-500/40' };
+      if (!seg._speedValid) {
+        return { color: '#94a3b8', label: '車速待確認', badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40' };
       }
+      const styles = {
+        1: { color: '#10b981', label: '順暢', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+        2: { color: '#eab308', label: '車多', badgeClass: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40' },
+        3: { color: '#f97316', label: '壅塞', badgeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/40' },
+        4: { color: '#ef4444', label: '嚴重壅塞', badgeClass: 'bg-red-500/20 text-red-300 border-red-500/40' },
+        5: { color: '#b91c1c', label: '極度壅塞', badgeClass: 'bg-red-700/20 text-red-200 border-red-600/40' }
+      };
+      return styles[seg._congestionLevel] || {
+        color: '#94a3b8', label: '分級待確認',
+        badgeClass: 'bg-slate-500/20 text-slate-300 border-slate-400/40'
+      };
     }
 
     function renderTrafficNetwork() {
@@ -678,8 +684,8 @@
       roadSegments.forEach(seg => {
         if (!Array.isArray(seg.coords) || seg.coords.length < 2 || !Number.isFinite(Number(seg.speed))) return;
         const speed = Number(seg.speed);
-        const style = getSpeedStyle(speed, seg._stale, seg._speedValid);
-        const opacity = (seg._stale || !seg._speedValid) ? 0.72 : 0.96;
+        const style = getSpeedStyle(seg);
+        const opacity = (seg._stale || !seg._speedValid || seg._congestionLevel === null) ? 0.72 : 0.96;
         const outline = L.polyline(seg.coords, {
           color: '#020617', weight: 8, opacity: 0.58,
           lineCap: 'round', lineJoin: 'round'
@@ -914,8 +920,10 @@
         dot.classList.remove('bg-slate-500', 'bg-rose-500');
         if (manual) {
           const staleCount = roadSegments.filter(seg => seg._stale).length;
-          const invalidZeroCount = roadSegments.filter(seg => !seg._speedValid && !seg._stale).length;
-          showToast(`已載入 ${roadSegments.length} 筆路段（過期 ${staleCount}、0 車速待確認 ${invalidZeroCount}）`);
+          const zeroCount = roadSegments.filter(seg => !seg._speedValid && !seg._stale).length;
+          const validCount = roadSegments.filter(seg => !seg._stale && seg._speedValid && seg._congestionLevel !== null).length;
+          const pendingLevelCount = roadSegments.filter(seg => !seg._stale && seg._speedValid && seg._congestionLevel === null).length;
+          showToast(`路況 ${roadSegments.length.toLocaleString('zh-TW')} 筆｜有效 ${validCount.toLocaleString('zh-TW')}｜待確認 ${(zeroCount + pendingLevelCount).toLocaleString('zh-TW')}（0 車速 ${zeroCount}／分級 ${pendingLevelCount}）｜過期 ${staleCount}`);
         }
         if (!roadSegments.length) showToast('目前沒有可顯示的官方路段資料，請稍後重試');
       } catch (error) {
