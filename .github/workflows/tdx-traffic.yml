@@ -49,6 +49,8 @@ jobs:
             cp "$DATA_DIR/tdx-shapes-cache.json" data/
             cp "$DATA_DIR/tdx-congestion-definitions.json" data/
 
+            # Stage refreshed files before checking whether there are changes.
+            git add data/tdx-traffic.json data/tdx-shapes-cache.json data/tdx-congestion-definitions.json
 
             if git diff --cached --quiet; then
               echo "No traffic data changes."
