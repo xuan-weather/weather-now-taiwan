@@ -1,0 +1,88 @@
+name: Update Nationwide TDX VD Live Data
+
+on:
+  workflow_dispatch:
+  schedule:
+    # VD 使用獨立頻率，避免拖慢每 5 分鐘的一般道路即時車速更新。
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tdx-api-global
+  cancel-in-progress: false
+
+jobs:
+  update-vd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch nationwide official VD live observations
+        env:
+          TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
+          TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
+        run: python scripts/fetch_tdx_traffic.py --vd-only
+      - name: Publish latest VD snapshot without overwriting newer data
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          DATA_DIR="$(mktemp -d)"
+          cp data/tdx-vd.json "$DATA_DIR/"
+          cp data/tdx-vd-static-cache.json "$DATA_DIR/"
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            if [ -f data/tdx-vd.json ]; then
+              if python - "$DATA_DIR/tdx-vd.json" data/tdx-vd.json <<'PY'
+          import json, sys
+          from datetime import datetime, timezone
+          def stamp(path):
+              with open(path, encoding="utf-8") as f:
+                  value = json.load(f).get("generatedAt")
+              if not value:
+                  return None
+              parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+              return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+          candidate, published = map(stamp, sys.argv[1:3])
+          if candidate is None:
+              raise SystemExit("Candidate VD snapshot has no generatedAt timestamp")
+          if published is not None and published > candidate:
+              print("A newer VD snapshot is already published; keeping it.")
+              raise SystemExit(10)
+          PY
+              then
+                :
+              else
+                status=$?
+                if [ "$status" -eq 10 ]; then exit 0; fi
+                exit "$status"
+              fi
+            fi
+
+            cp "$DATA_DIR/tdx-vd.json" data/
+            cp "$DATA_DIR/tdx-vd-static-cache.json" data/
+            git add data/tdx-vd.json data/tdx-vd-static-cache.json
+            if git diff --cached --quiet; then
+              echo "VD snapshot unchanged."
+              exit 0
+            fi
+            git commit -m "Refresh nationwide TDX VD live data"
+            if git push origin HEAD:main; then
+              echo "VD snapshot published."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Unable to publish VD snapshot after 3 attempts."
+          exit 1
