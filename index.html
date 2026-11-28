@@ -181,7 +181,7 @@ all:{center:[23.75,120.95],zoom:8,name:'全台路網'}
 };
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const parseDate=v=>{if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d;};
-function segmentFresh(seg){const d=parseDate(seg.updateTime);return !!d && (Date.now()-d.getTime())>=-5*60*1000 && (Date.now()-d.getTime())<=30*60*1000;}
+function segmentFresh(seg){const speed=Number(seg.speed);const d=parseDate(seg.updateTime);return Number.isFinite(speed)&&speed>0&&speed<=200&&!!d&&(Date.now()-d.getTime())>=-5*60*1000&&(Date.now()-d.getTime())<=30*60*1000;}
 function formatTime(v){const d=parseDate(v);return d?d.toLocaleString('zh-TW',{hour12:false}):'時間未提供';}
 function routeMeta(seg){
 const text=`${seg.name||''} ${seg.id||''}`;
@@ -193,7 +193,7 @@ const highway=n?`N${n}`:(freeway?'OTHER_FREEWAY':provincial?'HIGHWAY':'CITY');
 return {highway,highwayName:n?`國道${n}號`:freeway?'國道/快速道路':provincial?'省道':'市區道路'};
 }
 function getSpeedStyle(speed,fresh=true){
-if(!fresh)return {color:'#94a3b8',glow:'',label:'待確認/逾期',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'};
+if(!fresh)return {color:'#94a3b8',glow:'',label:Number(speed)===0?'車速待確認':'待確認/逾期',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'};
 if(speed>=80)return {color:'#10b981',glow:'glow-green',label:'順暢',badgeBg:'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'};
 if(speed>=60)return {color:'#f59e0b',glow:'glow-yellow',label:'車多',badgeBg:'bg-amber-500/20 text-amber-400 border-amber-500/40'};
 if(speed>=40)return {color:'#f97316',glow:'glow-orange',label:'壅塞',badgeBg:'bg-orange-500/20 text-orange-400 border-orange-500/40'};
@@ -287,7 +287,7 @@ const meta=routeMeta(s);return {...s,...meta,speed:Number(s.speed),direction:s.d
 let incidentData={},cctvData={};
 if(incidentsRes&&incidentsRes.ok){try{incidentData=await incidentsRes.json();}catch(_){incidentData={};}}
 if(cctvRes&&cctvRes.ok){try{cctvData=await cctvRes.json();}catch(_){cctvData={};}}
-trafficEvents=Array.isArray(incidentData.incidents)?incidentData.incidents.map(e=>({...e,lat:Number(e.lat),lng:Number(e.lng),location:e.road||'道路位置未提供',lanes:e.lane||'未提供',description:e.desc||'',delay:'未提供'})):[];
+trafficEvents=Array.isArray(incidentData.incidents)?incidentData.incidents.map(e=>{const crashTitle=/(車禍|追撞|擦撞|自撞|翻覆|碰撞|事故現場|事故處理|事故發生|accident|collision)/i.test(String(e.title||''));const safeType=e.type==='accident'&&!crashTitle?'incident':e.type;return {...e,type:safeType,lat:Number(e.lat),lng:Number(e.lng),location:e.road||'道路位置未提供',lanes:e.lane||'未提供',description:e.desc||'',delay:'未提供'};}):[];
 liveCctv=Array.isArray(cctvData.cctv)?cctvData.cctv.map(c=>({...c,lat:Number(c.lat),lng:Number(c.lng)})):[];
 sourceMeta=payload;
 const official=payload.officialDataAt||payload.generatedAt;
