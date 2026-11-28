@@ -41,7 +41,8 @@ def parse_milepost_context(text):
     if not direction:
         return None
     km = int(km_match.group(1)) + int(km_match.group(2) or 0) / 1000
-    return road_match.group(1), direction, km
+    road_code = road_match.group(1) + ("-high" if re.search(r"高架|汐止楊梅", text) else "")
+    return road_code, direction, km
 
 
 def parse_kml_mileposts(raw_zip):
