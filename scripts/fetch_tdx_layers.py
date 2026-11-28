@@ -120,13 +120,16 @@ def fetch_cctv(bearer):
     return list(cameras.values()), statuses
 
 def classify_event(item):
-    text = " ".join(str(value(item,k) or "") for k in
-        ("EventType","EventTypeCode","EventCategory","Description","EventTitle","Title","Comment","Remark")).lower()
-    if any(x in text for x in ("施工","roadwork","workzone","維護")):
+    # Classify from the event title/type, not the long free-text description.
+    # Generic words such as 「緊急事故」 often appear in road-closure boilerplate
+    # and must not create a false crash marker.
+    title = " ".join(str(value(item,k) or "") for k in
+        ("EventTitle","Title","EventType","EventTypeCode","EventCategory")).lower()
+    if any(x in title for x in ("施工","roadwork","workzone","維護工程")):
         return "roadwork"
-    if any(x in text for x in ("事故","車禍","accident","collision")):
+    if any(x in title for x in ("車禍","追撞","擦撞","自撞","翻覆","碰撞","事故現場","事故處理","事故發生","accident","collision")):
         return "accident"
-    if any(x in text for x in ("故障","breakdown","拋錨")):
+    if any(x in title for x in ("故障車","車輛故障","breakdown","拋錨")):
         return "breakdown"
     return "incident"
 
