@@ -266,7 +266,7 @@ marker.bindPopup(`<div class="p-3.5"><span class="text-xs font-bold" style="colo
 evt.leafletMarker=marker;
 });
 const cityCoverage=sourceMeta.cityCoverage||{},cityOk=Number(cityCoverage.successful)||0,cityExpected=Number(cityCoverage.expected)||22;
-document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${freshCount} / ${roadSegments.length} 段｜分級待確認 ${unclassified}｜縣市 API 成功 ${cityOk}/${cityExpected}`;
+document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${freshCount} / ${roadSegments.length} 段｜分級待確認 ${unclassified}｜縣市有路況 ${cityOk}/${cityExpected}`;
 document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
 renderCctvLayer();
 }
