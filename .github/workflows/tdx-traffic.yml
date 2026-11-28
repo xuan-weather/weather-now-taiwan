@@ -7,7 +7,8 @@ on:
       - "scripts/fetch_tdx_traffic.py"
       - ".github/workflows/tdx-traffic.yml"
   schedule:
-    - cron: "*/20 * * * *"
+    # TDX API traffic collection: every 30 minutes, staggered from supplementary layers.
+    - cron: "5,35 * * * *"
 permissions:
   contents: write
 concurrency:
