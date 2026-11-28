@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>國道即時路況監控中心 | 1968 Live Traffic</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- Google Fonts: Inter & Noto Sans TC -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
+                        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* 全螢幕地圖與自訂捲軸樣式 */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #090d16;
+            user-select: none;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            background: #0b0f19;
+        }
+
+        /* 隱藏預設 Leaflet 縮放控制項（改用自訂懸浮控制） */
+        .leaflet-control-zoom {
+            display: none !important;
+        }
+        .leaflet-control-attribution {
+            background: rgba(15, 23, 42, 0.7) !important;
+            color: #64748b !important;
+            backdrop-filter: blur(4px);
+            font-size: 10px !important;
+            border-top-left-radius: 6px;
+        }
+        .leaflet-control-attribution a {
+            color: #94a3b8 !important;
+        }
+
+        /* 高發光路況線段 SVG 濾鏡效果 */
+        .glow-green {
+            filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.85));
+        }
+        .glow-yellow {
+            filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.85));
+        }
+        .glow-orange {
+            filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.9));
+        }
+        .glow-red {
+            filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.95));
+        }
+        .glow-purple {
+            filter: drop-shadow(0 0 10px rgba(168, 85, 247, 1));
+            animation: pulseGlow 2s infinite alternate;
+        }
+
+        @keyframes pulseGlow {
+            0% { stroke-opacity: 0.85; }
+            100% { stroke-opacity: 1; }
+        }
+
+        /* 自訂 Leaflet 彈出視窗 (Popup) 深色毛玻璃風格 */
+        .leaflet-popup-content-wrapper {
+            background: rgba(15, 23, 42, 0.88) !important;
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+            border: 1px solid rgba(51, 65, 85, 0.7) !important;
+            color: #f8fafc !important;
+            border-radius: 14px !important;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.6) !important;
+            padding: 0 !important;
+        }
+        .leaflet-popup-content {
+            margin: 0 !important;
+            min-width: 260px;
+            max-width: 310px;
+        }
+        .leaflet-popup-tip {
+            background: rgba(15, 23, 42, 0.88) !important;
+            border: 1px solid rgba(51, 65, 85, 0.7) !important;
+        }
+        .leaflet-popup-close-button {
+            color: #94a3b8 !important;
+            top: 10px !important;
+            right: 10px !important;
+            font-size: 18px !important;
+        }
+        .leaflet-popup-close-button:hover {
+            color: #ffffff !important;
+        }
+
+        /* 自訂細緻深色捲軸 */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(71, 85, 105, 0.6);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(100, 116, 139, 0.9);
+        }
+
+        /* 攝影機掃描線動畫 (模擬即時影像畫面) */
+        .cctv-scanline {
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.25) 50%,
+                rgba(0,0,0,0.25)
+            );
+            background-size: 100% 4px;
+        }
+
+        /* CMS 電子看板 LED 點陣文字效果 */
+        .cms-led-text {
+            text-shadow: 0 0 6px currentColor;
+        }
+
+        /* 自訂地圖標記呼吸燈 */
+        .marker-ping {
+            animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+        @keyframes ping {
+            75%, 100% {
+                transform: scale(1.8);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body class="text-slate-100 font-sans antialiased">
+
+    <!-- 全螢幕深色地圖容器 -->
+    <div id="map"></div>
+
+    <!-- ==================== 1. 頂部懸浮狀態列 ==================== -->
+    <header class="fixed top-3 left-3 right-3 z-30 pointer-events-none flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5">
+        
+        <!-- 左側：品牌標題與系統狀態 -->
+        <div class="pointer-events-auto bg-slate-900/80 backdrop-blur-md border border-slate-700/60 rounded-2xl px-4 py-2.5 shadow-2xl flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="relative flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400">
+                    <i class="fa-solid fa-road text-lg"></i>
+                    <span class="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-sm sm:text-base font-bold tracking-wide text-white">國道即時路況監控中心</h1>
+                        <span class="hidden sm:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">1968 LIVE</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 flex items-center gap-2">
+                        <span id="data-mode-badge" class="text-emerald-400 font-medium">● 模擬即時路網引擎</span>
+                        <span>|</span>
+                        <span>更新時間：<strong id="last-update-time" class="text-slate-200 font-mono">--:--:--</strong></span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- 手機版快速切換面板按鈕 -->
+            <div class="flex lg:hidden items-center gap-1.5">
+                <button onclick="toggleLeftPanel()" title="圖層與篩選" class="w-9 h-9 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/50 flex items-center justify-center text-slate-200 transition">
+                    <i class="fa-solid fa-layer-group text-sm"></i>
+                </button>
+                <button onclick="toggleRightDrawer()" title="壅塞與事件列表" class="relative w-9 h-9 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/50 flex items-center justify-center text-slate-200 transition">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-400 text-sm"></i>
+                    <span id="mobile-alert-badge" class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-[10px] font-bold flex items-center justify-center">4</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 中間/右側：總體路況指標摘要 + 更新倒數 + 設定按鈕 -->
+        <div class="pointer-events-auto bg-slate-900/80 backdrop-blur-md border border-slate-700/60 rounded-2xl px-3.5 py-2 shadow-2xl flex items-center justify-between lg:justify-end gap-3 sm:gap-5 overflow-x-auto">
+            
+            <!-- 總體指標摘要 -->
+            <div class="flex items-center gap-3 sm:gap-4 text-xs shrink-0">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></span>
+                    <span class="text-slate-400">順暢</span>
+                    <span id="stat-smooth" class="font-mono font-bold text-emerald-400 text-sm">0</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_#f59e0b]"></span>
+                    <span class="text-slate-400">車多</span>
+                    <span id="stat-busy" class="font-mono font-bold text-amber-400 text-sm">0</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_#ef4444]"></span>
+                    <span class="text-slate-400">壅塞熱點</span>
+                    <span id="stat-congested" class="font-mono font-bold text-rose-400 text-sm">0</span>
+                </div>
+            </div>
+
+            <div class="h-5 w-[1px] bg-slate-700/70 shrink-0"></div>
+
+            <!-- 倒數計時器與立即重新整理 -->
+            <div class="flex items-center gap-2 shrink-0">
+                <div class="hidden sm:flex items-center gap-1.5 text-xs text-slate-300 bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-700/60">
+                    <i class="fa-regular fa-clock text-cyan-400"></i>
+                    <span class="font-mono" id="countdown-timer">60s</span>
+                </div>
+
+                <button id="refresh-btn" onclick="manualRefresh()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600/90 hover:bg-cyan-500 active:scale-95 text-white text-xs font-medium shadow-lg shadow-cyan-950/50 transition cursor-pointer">
+                    <i id="refresh-icon" class="fa-solid fa-arrows-rotate"></i>
+                    <span>立即更新</span>
+                </button>
+
+                <button onclick="openTdxModal()" title="TDX 資料來源設定" class="w-8 h-8 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/50 flex items-center justify-center text-slate-300 hover:text-white transition cursor-pointer">
+                    <i class="fa-solid fa-sliders text-xs"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ==================== 2. 左側懸浮控制面板 (可收合) ==================== -->
+    <aside id="left-panel" class="fixed top-28 lg:top-20 left-3 z-20 w-72 max-w-[calc(100vw-1.5rem)] transition-all duration-300 transform translate-x-0">
+        <div class="bg-slate-900/80 backdrop-blur-md border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden">
+            
+            <!-- 面板標題列 -->
+            <div class="px-4 py-3 border-b border-slate-700/60 flex items-center justify-between bg-slate-800/40">
+                <div class="flex items-center gap-2 text-xs font-semibold text-slate-200 tracking-wider uppercase">
+                    <i class="fa-solid fa-compass text-cyan-400"></i>
+                    <span>視角與圖層控制</span>
+                </div>
+                <button onclick="toggleLeftPanel()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-700/50 transition" title="收合控制面板">
+                    <i class="fa-solid fa-chevron-left text-xs"></i>
+                </button>
+            </div>
+
+            <div class="p-3.5 space-y-4 max-h-[calc(100vh-14rem)] overflow-y-auto custom-scrollbar">
+                
+                <!-- 區域快速定位按鈕 -->
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-400 mb-2">區域快速定位</label>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        <button onclick="flyToRegion('south', this)" class="region-btn active-region flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 transition cursor-pointer">
+                            <i class="fa-solid fa-location-crosshairs text-[11px]"></i> 南部 (高雄/台南)
+                        </button>
+                        <button onclick="flyToRegion('north', this)" class="region-btn flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700/60 transition cursor-pointer">
+                            北部路網
+                        </button>
+                        <button onclick="flyToRegion('central', this)" class="region-btn flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700/60 transition cursor-pointer">
+                            中部路網
+                        </button>
+                        <button onclick="flyToRegion('all', this)" class="region-btn flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700/60 transition cursor-pointer">
+                            全台灣走廊
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 圖層開關 (Toggles) -->
+                <div>
+                    <label class="block text-[11px] font-semibold text-slate-400 mb-2">監控圖層開關</label>
+                    <div class="space-y-2">
+                        <!-- 即時車速路網 -->
+                        <label class="flex items-center justify-between p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800/80 border border-slate-700/40 cursor-pointer transition">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs">
+                                    <i class="fa-solid fa-wave-square"></i>
+                                </span>
+                                <span class="text-xs font-medium text-slate-200">即時車速路網</span>
+                            </div>
+                            <input type="checkbox" id="toggle-traffic" checked onchange="toggleLayer('traffic', this.checked)" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 relative"></div>
+                        </label>
+
+                        <!-- 事故與施工標記 -->
+                        <label class="flex items-center justify-between p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800/80 border border-slate-700/40 cursor-pointer transition">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-6 h-6 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center text-xs">
+                                    <i class="fa-solid fa-car-burst"></i>
+                                </span>
+                                <span class="text-xs font-medium text-slate-200">事故與施工標記</span>
+                            </div>
+                            <input type="checkbox" id="toggle-events" checked onchange="toggleLayer('events', this.checked)" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 relative"></div>
+                        </label>
+
+                        <!-- CCTV 路況攝影機 -->
+                        <label class="flex items-center justify-between p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800/80 border border-slate-700/40 cursor-pointer transition">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-6 h-6 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center text-xs">
+                                    <i class="fa-solid fa-video"></i>
+                                </span>
+                                <span class="text-xs font-medium text-slate-200">CCTV 路況攝影機</span>
+                            </div>
+                            <input type="checkbox" id="toggle-cctv" checked onchange="toggleLayer('cctv', this.checked)" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 relative"></div>
+                        </label>
+
+                        <!-- CMS 電子看板資訊 -->
+                        <label class="flex items-center justify-between p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800/80 border border-slate-700/40 cursor-pointer transition">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs">
+                                    <i class="fa-solid fa-display"></i>
+                                </span>
+                                <span class="text-xs font-medium text-slate-200">CMS 資訊可變標誌</span>
+                            </div>
+                            <input type="checkbox" id="toggle-cms" checked onchange="toggleLayer('cms', this.checked)" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 relative"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 國道篩選器 -->
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="text-[11px] font-semibold text-slate-400">國道與快速道路篩選</label>
+                        <button onclick="resetHighwayFilter()" class="text-[10px] text-cyan-400 hover:underline">全部顯示</button>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5" id="highway-filters">
+                        <button data-hw="N1" onclick="toggleHighwayFilter('N1', this)" class="hw-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 transition cursor-pointer">
+                            國道 1 號
+                        </button>
+                        <button data-hw="N3" onclick="toggleHighwayFilter('N3', this)" class="hw-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 transition cursor-pointer">
+                            國道 3 號
+                        </button>
+                        <button data-hw="N5" onclick="toggleHighwayFilter('N5', this)" class="hw-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 transition cursor-pointer">
+                            國道 5 號
+                        </button>
+                        <button data-hw="N10_T88" onclick="toggleHighwayFilter('N10_T88', this)" class="hw-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 transition cursor-pointer">
+                            國10 / 台88線
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </aside>
+
+    <!-- 左側收合時的展開按鈕 -->
+    <button id="left-panel-expand-btn" onclick="toggleLeftPanel()" class="hidden fixed top-28 lg:top-20 left-3 z-20 bg-slate-900/85 hover:bg-slate-800 backdrop-blur-md border border-slate-700/60 text-cyan-400 px-3 py-2.5 rounded-2xl shadow-xl items-center gap-2 text-xs font-medium transition cursor-pointer">
+        <i class="fa-solid fa-layer-group"></i>
+        <span>控制面板</span>
+    </button>
+
+    <!-- ==================== 3. 右側/底部懸浮即時事件與路段列表 (可收合抽屜) ==================== -->
+    <aside id="right-drawer" class="fixed bottom-3 lg:bottom-auto lg:top-20 right-3 left-3 lg:left-auto z-20 lg:w-88 xl:w-96 transition-all duration-300 transform translate-y-0 lg:translate-x-0">
+        <div class="bg-slate-900/85 backdrop-blur-md border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[46vh] lg:max-h-[calc(100vh-6.2rem)]">
+            
+            <!-- 抽屜頂部 Tabs 與收合鈕 -->
+            <div class="px-3.5 py-2.5 border-b border-slate-700/60 bg-slate-800/50 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+                    <button id="tab-congested" onclick="switchDrawerTab('congested')" class="px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-600 text-white shadow transition cursor-pointer">
+                        重點壅塞路段
+                    </button>
+                    <button id="tab-events" onclick="switchDrawerTab('events')" class="px-3 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition cursor-pointer flex items-center gap-1.5">
+                        <span>突發事件</span>
+                        <span id="event-count-badge" class="px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[10px]">4</span>
+                    </button>
+                </div>
+
+                <button onclick="toggleRightDrawer()" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-700/50 transition" title="收合列表">
+                    <i class="fa-solid fa-chevron-down lg:hidden text-xs"></i>
+                    <i class="fa-solid fa-chevron-right hidden lg:inline text-xs"></i>
+                </button>
+            </div>
+
+            <!-- 列表內容區域 -->
+            <div id="drawer-content" class="p-3 space-y-2.5 overflow-y-auto custom-scrollbar flex-1">
+                <!-- 由 JS 動態渲染壅塞路段或突發事件卡片 -->
+            </div>
+        </div>
+    </aside>
+
+    <!-- 右側收合時的展開浮動按鈕 -->
+    <button id="right-drawer-expand-btn" onclick="toggleRightDrawer()" class="hidden fixed bottom-4 lg:bottom-auto lg:top-20 right-3 z-20 bg-slate-900/85 hover:bg-slate-800 backdrop-blur-md border border-slate-700/60 text-amber-400 px-3.5 py-2.5 rounded-2xl shadow-xl items-center gap-2 text-xs font-medium transition cursor-pointer">
+        <i class="fa-solid fa-list-ul"></i>
+        <span>即時路況與事件列表</span>
+    </button>
+
+    <!-- ==================== 4. 左下角車速圖例懸浮卡片 & 自訂縮放鈕 ==================== -->
+    <div class="fixed bottom-3 left-3 z-20 hidden sm:flex flex-col gap-2 pointer-events-none">
+        
+        <!-- 地圖縮放與重置按鈕 -->
+        <div class="pointer-events-auto flex items-center gap-1.5 self-start bg-slate-900/80 backdrop-blur-md border border-slate-700/60 p-1 rounded-xl shadow-lg">
+            <button onclick="map.zoomIn()" title="放大地圖" class="w-8 h-8 rounded-lg hover:bg-slate-700/70 text-slate-200 flex items-center justify-center transition cursor-pointer">
+                <i class="fa-solid fa-plus text-xs"></i>
+            </button>
+            <div class="w-[1px] h-4 bg-slate-700"></div>
+            <button onclick="map.zoomOut()" title="縮小地圖" class="w-8 h-8 rounded-lg hover:bg-slate-700/70 text-slate-200 flex items-center justify-center transition cursor-pointer">
+                <i class="fa-solid fa-minus text-xs"></i>
+            </button>
+        </div>
+
+        <!-- 車速顏色對應表 -->
+        <div class="pointer-events-auto bg-slate-900/80 backdrop-blur-md border border-slate-700/60 rounded-2xl px-3.5 py-2.5 shadow-2xl">
+            <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between gap-4">
+                <span>高公局車速指標 (km/h)</span>
+                <span class="text-slate-500">即時發光路網</span>
+            </div>
+            <div class="grid grid-cols-5 gap-2 text-center">
+                <div class="flex flex-col items-center gap-1">
+                    <span class="w-full h-1.5 rounded-full bg-[#10b981] shadow-[0_0_8px_#10b981]"></span>
+                    <span class="text-[10px] font-mono text-slate-300">&gt;80</span>
+                    <span class="text-[9px] text-emerald-400">順暢</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                    <span class="w-full h-1.5 rounded-full bg-[#f59e0b] shadow-[0_0_8px_#f59e0b]"></span>
+                    <span class="text-[10px] font-mono text-slate-300">60-79</span>
+                    <span class="text-[9px] text-amber-400">車多</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                    <span class="w-full h-1.5 rounded-full bg-[#f97316] shadow-[0_0_8px_#f97316]"></span>
+                    <span class="text-[10px] font-mono text-slate-300">40-59</span>
+                    <span class="text-[9px] text-orange-400">壅塞</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                    <span class="w-full h-1.5 rounded-full bg-[#ef4444] shadow-[0_0_8px_#ef4444]"></span>
+                    <span class="text-[10px] font-mono text-slate-300">20-39</span>
+                    <span class="text-[9px] text-rose-400">嚴重</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                    <span class="w-full h-1.5 rounded-full bg-[#a855f7] shadow-[0_0_10px_#a855f7]"></span>
+                    <span class="text-[10px] font-mono text-slate-300">&lt;20</span>
+                    <span class="text-[9px] text-purple-400">紫爆</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 5. 資料來源與 TDX API 設定彈窗 ==================== -->
+    <div id="tdx-modal" class="hidden fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden animate-fade-in">
+            <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-800/40">
+                <div class="flex items-center gap-2.5">
+                    <i class="fa-solid fa-database text-cyan-400"></i>
+                    <h3 class="font-bold text-white text-base">即時路況資料來源與 TDX API 串接設定</h3>
+                </div>
+                <button onclick="closeTdxModal()" class="text-slate-400 hover:text-white p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <div class="p-5 space-y-4 text-xs text-slate-300 leading-relaxed max-h-[75vh] overflow-y-auto custom-scrollbar">
+                
+                <!-- 模式切換 -->
+                <div class="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2.5">
+                    <div class="font-semibold text-white text-sm">目前運作模式</div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="mode-sim-btn" onclick="setDataMode('simulation')" class="p-2.5 rounded-xl border border-emerald-500/60 bg-emerald-500/15 text-emerald-300 font-semibold text-left transition cursor-pointer">
+                            <div class="flex items-center justify-between mb-1">
+                                <span>高擬真即時模擬引擎</span>
+                                <i class="fa-solid fa-circle-check"></i>
+                            </div>
+                            <div class="text-[11px] text-slate-400 font-normal">每 60 秒動態模擬車流波動與突發事件</div>
+                        </button>
+                        <button id="mode-tdx-btn" onclick="setDataMode('tdx')" class="p-2.5 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-400 font-semibold text-left hover:border-slate-600 transition cursor-pointer">
+                            <div class="flex items-center justify-between mb-1">
+                                <span>TDX 平台即時輪詢</span>
+                                <i class="fa-solid fa-cloud-arrow-down"></i>
+                            </div>
+                            <div class="text-[11px] text-slate-500 font-normal">串接交通部 TDX v2 國道即時路況 API</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- TDX 憑證輸入區 (選用) -->
+                <div id="tdx-credentials-box" class="hidden space-y-3 p-3.5 rounded-xl bg-slate-950/60 border border-cyan-500/30">
+                    <div class="text-cyan-300 font-semibold flex items-center gap-1.5">
+                        <i class="fa-solid fa-key"></i> 交通部 TDX API 憑證 (OAuth 2.0)
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Client ID</label>
+                        <input type="text" id="tdx-client-id" placeholder="輸入您的 TDX Client ID..." class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500 font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Client Secret</label>
+                        <input type="password" id="tdx-client-secret" placeholder="輸入您的 TDX Client Secret..." class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-cyan-500 font-mono">
+                    </div>
+                    <p class="text-[11px] text-amber-400/90">
+                        <i class="fa-solid fa-circle-info"></i> 提示：若未填寫憑證或瀏覽器受 CORS 限制，系統將自動無縫降級為「高擬真即時模擬引擎」確保畫面正常運作。
+                    </p>
+                </div>
+
+                <!-- 技術架構說明 -->
+                <div class="space-y-2">
+                    <h4 class="font-semibold text-white">如何串接交通部 TDX 運輸資料流通服務平台？</h4>
+                    <p class="text-slate-400">
+                        高公局 1968 即時路況資料已全面整合至交通部 <strong>TDX (Transport Data eXchange)</strong> 平台，資料更新頻率為每 1 分鐘一次：
+                    </p>
+                    <ul class="list-disc pl-4 space-y-1 text-slate-400">
+                        <li><strong class="text-slate-200">即時車速與旅行時間 (LiveTraffic)：</strong>呼叫 <code class="text-cyan-400 bg-slate-800 px-1 rounded">GET /v2/Road/Traffic/Live/Freeway</code> 取得各路段 <code class="text-slate-200">TravelSpeed</code> 與 <code class="text-slate-200">CongestionLevel</code>。</li>
+                        <li><strong class="text-slate-200">即時事件與施工 (LiveIncident)：</strong>呼叫 <code class="text-cyan-400 bg-slate-800 px-1 rounded">GET /v2/Road/Traffic/Live/Incident/Freeway</code> 取得事故座標與車道占用狀態。</li>
+                        <li><strong class="text-slate-200">CCTV 與 CMS 資訊：</strong>分別透過 <code class="text-cyan-400 bg-slate-800 px-1 rounded">/CCTV/Freeway</code> 與 <code class="text-cyan-400 bg-slate-800 px-1 rounded">/CMS/Live/Freeway</code> 取得即時影像串流連結與電子看板文字。</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="px-5 py-3 bg-slate-800/40 border-t border-slate-800 flex justify-end gap-2">
+                <button onclick="closeTdxModal()" class="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold transition cursor-pointer">
+                    套用並關閉
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系統提示訊息 Toast -->
+    <div id="toast-notification" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-opacity duration-300">
+        <div class="bg-slate-900/95 backdrop-blur-md border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded-full shadow-2xl text-xs font-medium flex items-center gap-2">
+            <i class="fa-solid fa-circle-check text-emerald-400"></i>
+            <span id="toast-message">已更新至最新路況資料</span>
+        </div>
+    </div>
+
+    <!-- ==================== JavaScript 核心邏輯 ==================== -->
+    <script>
+        // 1. 初始化全螢幕深色地圖 (預設聚焦高雄/台南南部路網走廊)
+        const map = L.map('map', {
+            center: [22.765, 120.345],
+            zoom: 11,
+            zoomControl: false,
+            attributionControl: true
+        });
+
+        // 載入 CartoDB Dark Matter 深色無標籤/簡潔標籤底圖
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO | 資料模擬：高公局 1968 / TDX',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(map);
+
+        // 圖層群組管理
+        const layers = {
+            traffic: L.layerGroup().addTo(map),
+            events: L.layerGroup().addTo(map),
+            cctv: L.layerGroup().addTo(map),
+            cms: L.layerGroup().addTo(map)
+        };
+
+        // 篩選狀態
+        let activeHighways = new Set(['N1', 'N3', 'N5', 'N10_T88']);
+        let currentDrawerTab = 'congested';
+        let dataMode = 'simulation';
+        let countdownSeconds = 60;
+
+        // 區域預設視角座標
+        const regions = {
+            south: { center: [22.755, 120.345], zoom: 11, name: '南部都會區路網 (高雄/台南)' },
+            north: { center: [25.035, 121.485], zoom: 11, name: '北部都會區路網 (雙北/桃園)' },
+            central: { center: [24.165, 120.645], zoom: 11, name: '中部都會區路網 (台中/彰化)' },
+            all: { center: [23.750, 120.950], zoom: 8, name: '全台灣國道走廊' }
+        };
+
+        // 2. 高擬真台灣國道與快速道路路網資料 (涵蓋高雄/台南重點走廊與北中南幹線)
+        let roadSegments = [
+            // --- 南部路網 (高雄/台南重點細膩路網) ---
+            {
+                id: 'N1-S-367', highway: 'N1', highwayName: '國道1號', direction: '南向',
+                name: '鼎金系統 — 高雄(九如/建國)', baseSpeed: 32, speed: 32, travelTime: 9, distance: '4.8 km',
+                coords: [[22.6815, 120.3395], [22.6650, 120.3360], [22.6480, 120.3325], [22.6330, 120.3310]]
+            },
+            {
+                id: 'N1-N-367', highway: 'N1', highwayName: '國道1號', direction: '北向',
+                name: '高雄(中正) — 鼎金系統', baseSpeed: 44, speed: 44, travelTime: 7, distance: '5.1 km',
+                coords: [[22.6265, 120.3325], [22.6480, 120.3340], [22.6650, 120.3375], [22.6815, 120.3410]]
+            },
+            {
+                id: 'N1-S-370', highway: 'N1', highwayName: '國道1號', direction: '南向',
+                name: '高雄(瑞隆) — 五甲系統/高雄端', baseSpeed: 18, speed: 18, travelTime: 14, distance: '4.2 km',
+                coords: [[22.6265, 120.3310], [22.6080, 120.3280], [22.5920, 120.3220], [22.5815, 120.3125]]
+            },
+            {
+                id: 'N1-S-356', highway: 'N1', highwayName: '國道1號', direction: '南向',
+                name: '楠梓 — 鼎金系統', baseSpeed: 55, speed: 55, travelTime: 6, distance: '5.5 km',
+                coords: [[22.7310, 120.3345], [22.7080, 120.3370], [22.6815, 120.3395]]
+            },
+            {
+                id: 'N1-S-338', highway: 'N1', highwayName: '國道1號', direction: '雙向',
+                name: '路竹 — 岡山 — 楠梓', baseSpeed: 96, speed: 96, travelTime: 10, distance: '16.0 km',
+                coords: [[22.8560, 120.2780], [22.8010, 120.3120], [22.7310, 120.3345]]
+            },
+            {
+                id: 'N1-S-320', highway: 'N1', highwayName: '國道1號', direction: '南向',
+                name: '永康 — 大灣 — 仁德系統', baseSpeed: 48, speed: 48, travelTime: 11, distance: '8.8 km',
+                coords: [[23.0420, 120.2460], [23.0050, 120.2510], [22.9560, 120.2550]]
+            },
+            {
+                id: 'N10-W-1', highway: 'N10_T88', highwayName: '國道10號', direction: '西向',
+                name: '仁武 — 鼎金系統 — 左營端', baseSpeed: 38, speed: 38, travelTime: 10, distance: '6.3 km',
+                coords: [[22.7040, 120.3650], [22.6820, 120.3400], [22.6855, 120.3080]]
+            },
+            {
+                id: 'N10-E-13', highway: 'N10_T88', highwayName: '國道10號', direction: '東向',
+                name: '燕巢系統 — 嶺口 — 旗山端', baseSpeed: 92, speed: 92, travelTime: 11, distance: '16.8 km',
+                coords: [[22.7680, 120.3980], [22.8150, 120.4450], [22.8680, 120.4920]]
+            },
+            {
+                id: 'T88-W-1', highway: 'N10_T88', highwayName: '台88線', direction: '西向',
+                name: '大寮 — 鳳山 — 五甲系統', baseSpeed: 42, speed: 42, travelTime: 11, distance: '7.7 km',
+                coords: [[22.5960, 120.4020], [22.5930, 120.3620], [22.5920, 120.3220]]
+            },
+            {
+                id: 'N3-S-383', highway: 'N3', highwayName: '國道3號', direction: '雙向',
+                name: '田寮 — 燕巢系統 — 九如', baseSpeed: 102, speed: 102, travelTime: 13, distance: '22.1 km',
+                coords: [[22.8650, 120.3820], [22.7680, 120.3980], [22.7250, 120.4850]]
+            },
+
+            // --- 中部路網 ---
+            {
+                id: 'N1-C-178', highway: 'N1', highwayName: '國道1號', direction: '南向',
+                name: '大雅 — 台中(中港) — 南屯', baseSpeed: 36, speed: 36, travelTime: 13, distance: '7.8 km',
+                coords: [[24.2180, 120.6520], [24.1780, 120.6350], [24.1420, 120.6250]]
+            },
+            {
+                id: 'N3-C-196', highway: 'N3', highwayName: '國道3號', direction: '雙向',
+                name: '龍井 — 彰化系統 — 快官', baseSpeed: 88, speed: 88, travelTime: 12, distance: '17.6 km',
+                coords: [[24.1920, 120.5620], [24.1150, 120.5680], [24.0850, 120.6120]]
+            },
+
+            // --- 北部路網 ---
+            {
+                id: 'N1-N-23', highway: 'N1', highwayName: '國道1號', direction: '南向',
+                name: '圓山 — 台北 — 三重 — 五股', baseSpeed: 29, speed: 29, travelTime: 18, distance: '8.7 km',
+                coords: [[25.0750, 121.5280], [25.0780, 121.5080], [25.0720, 121.4820], [25.0680, 121.4420]]
+            },
+            {
+                id: 'N3-N-26', highway: 'N3', highwayName: '國道3號', direction: '北向',
+                name: '中和 — 安坑 — 新店 — 木柵', baseSpeed: 64, speed: 64, travelTime: 11, distance: '11.7 km',
+                coords: [[24.9880, 121.4950], [24.9680, 121.5180], [24.9750, 121.5480], [25.0020, 121.5720]]
+            },
+            {
+                id: 'N5-N-15', highway: 'N5', highwayName: '國道5號', direction: '南向',
+                name: '石碇 — 坪林 — 雪山隧道 — 頭城', baseSpeed: 46, speed: 46, travelTime: 28, distance: '21.5 km',
+                coords: [[24.9920, 121.6580], [24.9380, 121.7120], [24.8950, 121.7680], [24.8480, 121.8120]]
+            }
+        ];
+
+        // 3. 即時突發事件資料 (事故、施工、散落物)
+        let trafficEvents = [
+            {
+                id: 'EVT-01', type: 'accident', title: '兩小客車追撞事故',
+                highway: 'N1', location: '國道1號 南向 371.2K (五甲系統前)',
+                coords: [22.5965, 120.3245], time: '8 分鐘前',
+                lanes: '占用外側車道與路肩', delay: '+12 分鐘',
+                description: '高公局南區交控中心已派遣緩撞車與國道警力前往處理，後方車流回堵約 2.5 公里，請提前改道。'
+            },
+            {
+                id: 'EVT-02', type: 'construction', title: '橋面伸縮縫例行養護施工',
+                highway: 'N10_T88', location: '國道10號 西向 2.4K (鼎金系統前)',
+                coords: [22.6835, 120.3480], time: '進行中 (預計 17:00 結束)',
+                lanes: '封閉外側車道', delay: '+7 分鐘',
+                description: '施工單位進行橋面伸縮縫修繕作業，現場設有移動式施工標誌，行經請減速慢行。'
+            },
+            {
+                id: 'EVT-03', type: 'debris', title: '中線車道大型散落物 (帆布)',
+                highway: 'N1', location: '國道1號 南向 179.5K (台中交流道附近)',
+                coords: [24.1720, 120.6335], time: '3 分鐘前',
+                lanes: '影響中線車道通行', delay: '+9 分鐘',
+                description: '工務段清潔車輛已出發排除中，請用路人注意車前狀況，切勿急煞變換車道。'
+            },
+            {
+                id: 'EVT-04', type: 'accident', title: '多車擦撞事故處理中',
+                highway: 'N1', location: '國道1號 南向 25.8K (台北—三重路段)',
+                coords: [25.0755, 121.4960], time: '14 分鐘前',
+                lanes: '占用內側及中線車道', delay: '+15 分鐘',
+                description: '拖吊車已抵達現場進行排除作業，建議北上南下車輛改走環河快速道路。'
+            }
+        ];
+
+        // 4. CCTV 即時路況攝影機節點
+        const cctvNodes = [
+            {
+                id: 'CCTV-N1-367K', name: '國道1號 367.4K (鼎金系統交流道)',
+                highway: 'N1', coords: [22.6805, 120.3385],
+                status: '車多壅塞 • 南向車流密集', speed: '34 km/h'
+            },
+            {
+                id: 'CCTV-N1-371K', name: '國道1號 371.0K (五甲系統北側)',
+                highway: 'N1', coords: [22.6010, 120.3260],
+                status: '嚴重壅塞 • 前方事故回堵', speed: '19 km/h'
+            },
+            {
+                id: 'CCTV-T88-2K', name: '台88線 2.2K (鳳山交流道東側)',
+                highway: 'N10_T88', coords: [22.5928, 120.3510],
+                status: '車多 • 雙向車流穩定', speed: '45 km/h'
+            },
+            {
+                id: 'CCTV-N3-383K', name: '國道3號 383.0K (燕巢系統交流道)',
+                highway: 'N3', coords: [22.7685, 120.3970],
+                status: '順暢 • 視線良好', speed: '104 km/h'
+            },
+            {
+                id: 'CCTV-N5-16K', name: '國道5號 16.2K (雪山隧道北口)',
+                highway: 'N5', coords: [24.9250, 121.7250],
+                status: '車多 • 啟動匝道儀控管制', speed: '48 km/h'
+            }
+        ];
+
+        // 5. CMS 資訊可變標誌 (電子看板)
+        const cmsNodes = [
+            {
+                id: 'CMS-N1-363K', name: '國1南向 363.5K (楠梓路段 CMS)',
+                highway: 'N1', coords: [22.7020, 120.3375],
+                line1: '五甲系統前 371K 事故',
+                line2: '鼎金至高雄端 行車約 23 分',
+                color: '#f59e0b'
+            },
+            {
+                id: 'CMS-N10-4K', name: '國10西向 4.5K (仁武路段 CMS)',
+                highway: 'N10_T88', coords: [22.6950, 120.3560],
+                line1: '鼎金系統前 2K 外側施工',
+                line2: '往左營方向 請減速慢行',
+                color: '#ef4444'
+            },
+            {
+                id: 'CMS-N1-174K', name: '國1南向 174.0K (大雅路段 CMS)',
+                highway: 'N1', coords: [24.2050, 120.6480],
+                line1: '台中路段 179K 中線散落物',
+                line2: '注意車前狀況 保持安全車距',
+                color: '#f59e0b'
+            }
+        ];
+
+        // 依據車速取得高公局標準顏色與發光樣式
+        function getSpeedStyle(speed) {
+            if (speed >= 80) {
+                return { color: '#10b981', glow: 'glow-green', label: '順暢', badgeBg: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' };
+            } else if (speed >= 60) {
+                return { color: '#f59e0b', glow: 'glow-yellow', label: '車多', badgeBg: 'bg-amber-500/20 text-amber-400 border-amber-500/40' };
+            } else if (speed >= 40) {
+                return { color: '#f97316', glow: 'glow-orange', label: '壅塞', badgeBg: 'bg-orange-500/20 text-orange-400 border-orange-500/40' };
+            } else if (speed >= 20) {
+                return { color: '#ef4444', glow: 'glow-red', label: '嚴重壅塞', badgeBg: 'bg-rose-500/20 text-rose-400 border-rose-500/40' };
+            } else {
+                return { color: '#a855f7', glow: 'glow-purple', label: '紫爆極度壅塞', badgeBg: 'bg-purple-500/20 text-purple-300 border-purple-500/50' };
+            }
+        }
+
+        // 6. 渲染地圖上的所有圖層與物件
+        function renderMapObjects() {
+            layers.traffic.clearLayers();
+            layers.events.clearLayers();
+            layers.cctv.clearLayers();
+            layers.cms.clearLayers();
+
+            let smoothCount = 0;
+            let busyCount = 0;
+            let congestedCount = 0;
+
+            // (A) 繪製高發光動態路況線段
+            roadSegments.forEach(seg => {
+                if (seg.speed >= 80) smoothCount++;
+                else if (seg.speed >= 60) busyCount++;
+                else congestedCount++;
+
+                if (!activeHighways.has(seg.highway)) return;
+
+                const style = getSpeedStyle(seg.speed);
+
+                // 底層發光暈染線
+                L.polyline(seg.coords, {
+                    color: style.color,
+                    weight: 10,
+                    opacity: 0.25,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    interactive: false
+                }).addTo(layers.traffic);
+
+                // 核心高亮度實線
+                const line = L.polyline(seg.coords, {
+                    color: style.color,
+                    weight: 4.5,
+                    opacity: 0.95,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    className: style.glow
+                }).addTo(layers.traffic);
+
+                // 綁定路段資訊彈出氣泡框
+                const popupHtml = `
+                    <div class="p-3.5">
+                        <div class="flex items-center justify-between gap-2 mb-2 pr-4">
+                            <span class="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">
+                                ${seg.highwayName} • ${seg.direction}
+                            </span>
+                            <span class="text-[11px] font-semibold px-2 py-0.5 rounded border ${style.badgeBg}">
+                                ${style.label}
+                            </span>
+                        </div>
+                        <h4 class="font-bold text-sm text-white mb-2.5">${seg.name}</h4>
+                        <div class="grid grid-cols-3 gap-2 bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 text-center">
+                            <div>
+                                <div class="text-[10px] text-slate-400">平均時速</div>
+                                <div class="font-mono font-bold text-base" style="color: ${style.color}">${seg.speed} <span class="text-[10px] font-normal">km/h</span></div>
+                            </div>
+                            <div class="border-x border-slate-800">
+                                <div class="text-[10px] text-slate-400">旅行時間</div>
+                                <div class="font-mono font-bold text-base text-white">${seg.travelTime} <span class="text-[10px] font-normal">分</span></div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] text-slate-400">路段長度</div>
+                                <div class="font-mono font-bold text-sm text-slate-300 mt-0.5">${seg.distance}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                line.bindPopup(popupHtml);
+                seg.leafletLayer = line;
+            });
+
+            // 更新頂部指標統計數字
+            document.getElementById('stat-smooth').textContent = smoothCount;
+            document.getElementById('stat-busy').textContent = busyCount;
+            document.getElementById('stat-congested').textContent = congestedCount;
+
+            // (B) 繪製即時突發事件標記 (事故/施工/散落物)
+            trafficEvents.forEach(evt => {
+                if (!activeHighways.has(evt.highway)) return;
+
+                let iconClass = 'fa-car-burst';
+                let bgColor = 'bg-rose-600';
+                let ringColor = 'bg-rose-500';
+                let typeLabel = '交通事故';
+
+                if (evt.type === 'construction') {
+                    iconClass = 'fa-person-digging';
+                    bgColor = 'bg-amber-600';
+                    ringColor = 'bg-amber-500';
+                    typeLabel = '道路施工';
+                } else if (evt.type === 'debris') {
+                    iconClass = 'fa-triangle-exclamation';
+                    bgColor = 'bg-orange-600';
+                    ringColor = 'bg-orange-500';
+                    typeLabel = '散落物排除';
+                }
+
+                const customIcon = L.divIcon({
+                    className: 'custom-event-marker',
+                    html: `
+                        <div class="relative flex items-center justify-center w-8 h-8">
+                            <span class="marker-ping absolute inline-flex h-full w-full rounded-full ${ringColor} opacity-60"></span>
+                            <div class="relative w-8 h-8 rounded-full ${bgColor} border-2 border-white shadow-lg flex items-center justify-center text-white text-xs">
+                                <i class="fa-solid ${iconClass}"></i>
+                            </div>
+                        </div>
+                    `,
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+
+                const marker = L.marker(evt.coords, { icon: customIcon }).addTo(layers.events);
+                const popupHtml = `
+                    <div class="p-3.5">
+                        <div class="flex items-center gap-2 mb-1.5 pr-4">
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded ${bgColor} text-white">${typeLabel}</span>
+                            <span class="text-[11px] text-slate-400">${evt.time}</span>
+                        </div>
+                        <h4 class="font-bold text-sm text-white mb-1">${evt.title}</h4>
+                        <div class="text-xs text-cyan-300 mb-2 flex items-center gap-1">
+                            <i class="fa-solid fa-location-dot"></i> ${evt.location}
+                        </div>
+                        <div class="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 space-y-1.5 text-xs mb-2">
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">影響車道：</span>
+                                <span class="text-amber-300 font-medium">${evt.lanes}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">預估延誤：</span>
+                                <span class="text-rose-400 font-mono font-bold">${evt.delay}</span>
+                            </div>
+                        </div>
+                        <p class="text-[11px] text-slate-300 leading-relaxed">${evt.description}</p>
+                    </div>
+                `;
+                marker.bindPopup(popupHtml);
+                evt.leafletMarker = marker;
+            });
+
+            // (C) 繪製 CCTV 路況攝影機節點
+            cctvNodes.forEach(cam => {
+                if (!activeHighways.has(cam.highway)) return;
+
+                const camIcon = L.divIcon({
+                    className: 'custom-cctv-marker',
+                    html: `
+                        <div class="w-7 h-7 rounded-lg bg-slate-900/90 border border-sky-400/80 shadow-[0_0_10px_rgba(56,189,248,0.5)] flex items-center justify-center text-sky-400 hover:scale-110 transition">
+                            <i class="fa-solid fa-video text-[11px]"></i>
+                        </div>
+                    `,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+
+                const marker = L.marker(cam.coords, { icon: camIcon }).addTo(layers.cctv);
+                
+                // 模擬即時 CCTV 路況監控影像預覽畫面
+                const popupHtml = `
+                    <div class="p-3">
+                        <div class="flex items-center justify-between mb-2 pr-4">
+                            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                                <i class="fa-solid fa-circle text-[7px] text-rose-500 animate-pulse mr-1"></i>LIVE CCTV
+                            </span>
+                            <span class="text-[10px] font-mono text-slate-400">${cam.id}</span>
+                        </div>
+                        <h4 class="font-bold text-xs text-white mb-2">${cam.name}</h4>
+                        
+                        <!-- 模擬即時路況攝影機畫面框 -->
+                        <div class="relative w-full h-32 rounded-xl overflow-hidden bg-slate-950 border border-slate-700 mb-2 flex flex-col justify-between p-2">
+                            <!-- 模擬夜視高速公路透視圖 SVG -->
+                            <svg class="absolute inset-0 w-full h-full opacity-85" viewBox="0 0 300 140" preserveAspectRatio="none">
+                                <defs>
+                                    <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#020617"/>
+                                        <stop offset="100%" stop-color="#1e293b"/>
+                                    </linearGradient>
+                                </defs>
+                                <rect width="300" height="140" fill="url(#skyGrad)"/>
+                                <!-- 路面透視 -->
+                                <polygon points="115,45 185,45 280,140 20,140" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+                                <line x1="150" y1="45" x2="150" y2="140" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6,6"/>
+                                <!-- 車燈光點模擬 -->
+                                <circle cx="132" cy="85" r="2.5" fill="#fef08a" opacity="0.9"/>
+                                <circle cx="140" cy="85" r="2.5" fill="#fef08a" opacity="0.9"/>
+                                <circle cx="122" cy="115" r="3.5" fill="#ffffff"/>
+                                <circle cx="135" cy="115" r="3.5" fill="#ffffff"/>
+                                <circle cx="165" cy="75" r="2.5" fill="#ef4444"/>
+                                <circle cx="172" cy="75" r="2.5" fill="#ef4444"/>
+                                <circle cx="175" cy="105" r="3.5" fill="#ef4444"/>
+                                <circle cx="186" cy="105" r="3.5" fill="#ef4444"/>
+                            </svg>
+                            <div class="cctv-scanline absolute inset-0 pointer-events-none"></div>
+                            <div class="relative z-10 flex justify-between text-[9px] font-mono text-emerald-400 bg-black/50 px-1.5 py-0.5 rounded">
+                                <span>CAM-01 • 1080P</span>
+                                <span id="cam-time">${new Date().toTimeString().split(' ')[0]}</span>
+                            </div>
+                            <div class="relative z-10 text-[10px] font-medium text-white bg-black/60 px-2 py-0.5 rounded self-start">
+                                偵測車速：${cam.speed}
+                            </div>
+                        </div>
+                        <div class="text-[11px] text-slate-300 flex items-center gap-1.5">
+                            <i class="fa-solid fa-circle-info text-sky-400"></i>
+                            <span>${cam.status}</span>
+                        </div>
+                    </div>
+                `;
+                marker.bindPopup(popupHtml);
+            });
+
+            // (D) 繪製 CMS 資訊可變標誌 (電子看板)
+            cmsNodes.forEach(cms => {
+                if (!activeHighways.has(cms.highway)) return;
+
+                const cmsIcon = L.divIcon({
+                    className: 'custom-cms-marker',
+                    html: `
+                        <div class="px-1.5 py-0.5 rounded bg-slate-950/95 border border-amber-500/70 shadow-lg text-[9px] font-mono font-bold text-amber-400 whitespace-nowrap flex items-center gap-1">
+                            <i class="fa-solid fa-display text-[8px]"></i> CMS
+                        </div>
+                    `,
+                    iconSize: [44, 20],
+                    iconAnchor: [22, 10]
+                });
+
+                const marker = L.marker(cms.coords, { icon: cmsIcon }).addTo(layers.cms);
+                const popupHtml = `
+                    <div class="p-3.5">
+                        <div class="text-[10px] font-semibold text-slate-400 mb-1.5 pr-4">${cms.name}</div>
+                        <div class="bg-black border-2 border-slate-700 rounded-xl p-3 font-mono text-center shadow-inner space-y-1">
+                            <div class="text-xs font-bold cms-led-text" style="color: ${cms.color}">${cms.line1}</div>
+                            <div class="text-xs font-bold text-emerald-400 cms-led-text">${cms.line2}</div>
+                        </div>
+                    </div>
+                `;
+                marker.bindPopup(popupHtml);
+            });
+        }
+
+        // 7. 渲染右側/底部抽屜列表 (壅塞路段與突發事件)
+        function renderDrawerList() {
+            const container = document.getElementById('drawer-content');
+            container.innerHTML = '';
+
+            if (currentDrawerTab === 'congested') {
+                // 依照車速由慢到快排序，優先顯示壅塞與車多路段
+                const sortedSegments = [...roadSegments]
+                    .filter(s => activeHighways.has(s.highway))
+                    .sort((a, b) => a.speed - b.speed);
+
+                if (sortedSegments.length === 0) {
+                    container.innerHTML = `<div class="text-center text-xs text-slate-500 py-8">請至少選擇一條國道篩選條件</div>`;
+                    return;
+                }
+
+                sortedSegments.forEach(seg => {
+                    const style = getSpeedStyle(seg.speed);
+                    const centerCoord = seg.coords[Math.floor(seg.coords.length / 2)];
+                    
+                    const card = document.createElement('div');
+                    card.className = 'p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800/90 border border-slate-700/50 hover:border-cyan-500/50 transition cursor-pointer group';
+                    card.onclick = () => {
+                        map.flyTo(centerCoord, 13, { duration: 1.2 });
+                        if (seg.leafletLayer) {
+                            setTimeout(() => seg.leafletLayer.openPopup(), 600);
+                        }
+                    };
+
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-700">${seg.highwayName}</span>
+                                <span class="text-[10px] text-slate-400">${seg.direction}</span>
+                            </div>
+                            <span class="text-[10px] font-semibold px-2 py-0.5 rounded border ${style.badgeBg}">${style.label}</span>
+                        </div>
+                        <div class="flex items-center justify-between gap-2">
+                            <div>
+                                <div class="text-xs font-bold text-slate-100 group-hover:text-cyan-300 transition">${seg.name}</div>
+                                <div class="text-[11px] text-slate-400 mt-0.5">預估旅行時間：<span class="text-slate-200 font-mono">${seg.travelTime} 分鐘</span> (${seg.distance})</div>
+                            </div>
+                            <div class="text-right shrink-0">
+                                <div class="font-mono font-bold text-lg leading-none" style="color: ${style.color}">${seg.speed}</div>
+                                <div class="text-[9px] text-slate-500 mt-0.5">km/h</div>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+
+            } else {
+                // 突發事件列表
+                const filteredEvents = trafficEvents.filter(e => activeHighways.has(e.highway));
+                document.getElementById('event-count-badge').textContent = filteredEvents.length;
+                document.getElementById('mobile-alert-badge').textContent = filteredEvents.length;
+
+                if (filteredEvents.length === 0) {
+                    container.innerHTML = `<div class="text-center text-xs text-slate-500 py-8">目前篩選路網無突發事件</div>`;
+                    return;
+                }
+
+                filteredEvents.forEach(evt => {
+                    const isAccident = evt.type === 'accident';
+                    const badgeClass = isAccident 
+                        ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' 
+                        : (evt.type === 'construction' ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'bg-orange-500/20 text-orange-400 border-orange-500/40');
+                    const iconClass = isAccident ? 'fa-car-burst' : (evt.type === 'construction' ? 'fa-person-digging' : 'fa-triangle-exclamation');
+
+                    const card = document.createElement('div');
+                    card.className = 'p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800/90 border border-slate-700/50 hover:border-rose-500/50 transition cursor-pointer group';
+                    card.onclick = () => {
+                        map.flyTo(evt.coords, 14, { duration: 1.2 });
+                        if (evt.leafletMarker) {
+                            setTimeout(() => evt.leafletMarker.openPopup(), 600);
+                        }
+                    };
+
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                            <span class="text-[10px] font-semibold px-2 py-0.5 rounded border ${badgeClass} flex items-center gap-1">
+                                <i class="fa-solid ${iconClass}"></i> ${evt.title}
+                            </span>
+                            <span class="text-[10px] text-slate-400">${evt.time}</span>
+                        </div>
+                        <div class="text-xs font-medium text-slate-200 group-hover:text-white mb-1">${evt.location}</div>
+                        <div class="flex items-center justify-between text-[11px] text-slate-400">
+                            <span>${evt.lanes}</span>
+                            <span class="text-rose-400 font-mono font-semibold">延誤 ${evt.delay}</span>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            }
+        }
+
+        // 8. 模擬車速即時波動與更新時間戳記
+        function simulateTrafficUpdate(isManual = false) {
+            roadSegments.forEach(seg => {
+                // 在基礎車速上下隨機波動 -8 ~ +8 km/h，維持高擬真路況變化
+                const delta = Math.floor(Math.random() * 17) - 8;
+                seg.speed = Math.max(12, Math.min(110, seg.baseSpeed + delta));
+                // 依據新車速重新估算旅行時間
+                const distNum = parseFloat(seg.distance);
+                seg.travelTime = Math.max(2, Math.round((distNum / seg.speed) * 60));
+            });
+
+            // 更新時間戳記
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0];
+            document.getElementById('last-update-time').textContent = timeStr;
+
+            renderMapObjects();
+            renderDrawerList();
+
+            if (isManual) {
+                showToast(`已同步最新高公局路況 (${timeStr})`);
+            }
+        }
+
+        // 手動重新整理按鈕觸發
+        function manualRefresh() {
+            const icon = document.getElementById('refresh-icon');
+            icon.classList.add('fa-spin');
+            countdownSeconds = 60;
+            document.getElementById('countdown-timer').textContent = '60s';
+
+            setTimeout(() => {
+                simulateTrafficUpdate(true);
+                icon.classList.remove('fa-spin');
+            }, 450);
+        }
+
+        // 每秒倒數計時器 (每 60 秒自動輪詢更新)
+        setInterval(() => {
+            countdownSeconds--;
+            if (countdownSeconds <= 0) {
+                countdownSeconds = 60;
+                simulateTrafficUpdate(false);
+            }
+            document.getElementById('countdown-timer').textContent = `${countdownSeconds}s`;
+        }, 1000);
+
+        // 9. 互動控制函式
+        function flyToRegion(regionKey, btnElement) {
+            const target = regions[regionKey];
+            if (!target) return;
+
+            map.flyTo(target.center, target.zoom, { duration: 1.4 });
+
+            // 更新按鈕樣式
+            document.querySelectorAll('.region-btn').forEach(btn => {
+                btn.className = 'region-btn flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700/60 transition cursor-pointer';
+            });
+            if (btnElement) {
+                btnElement.className = 'region-btn active-region flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 transition cursor-pointer';
+            }
+            showToast(`視角已切換至：${target.name}`);
+        }
+
+        function toggleLayer(layerName, isVisible) {
+            if (isVisible) {
+                map.addLayer(layers[layerName]);
+            } else {
+                map.removeLayer(layers[layerName]);
+            }
+        }
+
+        function toggleHighwayFilter(hwCode, btnElement) {
+            if (activeHighways.has(hwCode)) {
+                activeHighways.delete(hwCode);
+                btnElement.className = 'hw-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800/80 text-slate-400 border border-slate-700/60 transition cursor-pointer';
+            } else {
+                activeHighways.add(hwCode);
+                btnElement.className = 'hw-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 transition cursor-pointer';
+            }
+            renderMapObjects();
+            renderDrawerList();
+        }
+
+        function resetHighwayFilter() {
+            activeHighways = new Set(['N1', 'N3', 'N5', 'N10_T88']);
+            document.querySelectorAll('.hw-chip').forEach(btn => {
+                btn.className = 'hw-chip px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 transition cursor-pointer';
+            });
+            renderMapObjects();
+            renderDrawerList();
+        }
+
+        function switchDrawerTab(tab) {
+            currentDrawerTab = tab;
+            const tabCongested = document.getElementById('tab-congested');
+            const tabEvents = document.getElementById('tab-events');
+
+            if (tab === 'congested') {
+                tabCongested.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-600 text-white shadow transition cursor-pointer';
+                tabEvents.className = 'px-3 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition cursor-pointer flex items-center gap-1.5';
+            } else {
+                tabEvents.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-rose-600 text-white shadow transition cursor-pointer flex items-center gap-1.5';
+                tabCongested.className = 'px-3 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition cursor-pointer';
+            }
+            renderDrawerList();
+        }
+
+        // 左側面板收合/展開
+        let leftPanelOpen = true;
+        function toggleLeftPanel() {
+            const panel = document.getElementById('left-panel');
+            const expandBtn = document.getElementById('left-panel-expand-btn');
+            leftPanelOpen = !leftPanelOpen;
+
+            if (leftPanelOpen) {
+                panel.classList.remove('-translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                expandBtn.classList.add('hidden');
+                expandBtn.classList.remove('flex');
+            } else {
+                panel.classList.add('-translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                expandBtn.classList.remove('hidden');
+                expandBtn.classList.add('flex');
+            }
+        }
+
+        // 右側/底部抽屜收合/展開
+        let rightDrawerOpen = true;
+        function toggleRightDrawer() {
+            const drawer = document.getElementById('right-drawer');
+            const expandBtn = document.getElementById('right-drawer-expand-btn');
+            rightDrawerOpen = !rightDrawerOpen;
+
+            if (rightDrawerOpen) {
+                drawer.classList.remove('translate-y-[120%]', 'lg:translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                expandBtn.classList.add('hidden');
+                expandBtn.classList.remove('flex');
+            } else {
+                drawer.classList.add('translate-y-[120%]', 'lg:translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                expandBtn.classList.remove('hidden');
+                expandBtn.classList.add('flex');
+            }
+        }
+
+        // TDX 設定彈窗控制
+        function openTdxModal() {
+            document.getElementById('tdx-modal').classList.remove('hidden');
+        }
+        function closeTdxModal() {
+            document.getElementById('tdx-modal').classList.add('hidden');
+        }
+
+        function setDataMode(mode) {
+            dataMode = mode;
+            const simBtn = document.getElementById('mode-sim-btn');
+            const tdxBtn = document.getElementById('mode-tdx-btn');
+            const credBox = document.getElementById('tdx-credentials-box');
+            const badge = document.getElementById('data-mode-badge');
+
+            if (mode === 'simulation') {
+                simBtn.className = 'p-2.5 rounded-xl border border-emerald-500/60 bg-emerald-500/15 text-emerald-300 font-semibold text-left transition cursor-pointer';
+                tdxBtn.className = 'p-2.5 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-400 font-semibold text-left hover:border-slate-600 transition cursor-pointer';
+                credBox.classList.add('hidden');
+                badge.textContent = '● 模擬即時路網引擎';
+                badge.className = 'text-emerald-400 font-medium';
+            } else {
+                tdxBtn.className = 'p-2.5 rounded-xl border border-cyan-500/60 bg-cyan-500/15 text-cyan-300 font-semibold text-left transition cursor-pointer';
+                simBtn.className = 'p-2.5 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-400 font-semibold text-left hover:border-slate-600 transition cursor-pointer';
+                credBox.classList.remove('hidden');
+                badge.textContent = '● TDX 即時輪詢 (自動降級保護)';
+                badge.className = 'text-cyan-400 font-medium';
+            }
+        }
+
+        // Toast 提示訊息
+        let toastTimeout;
+        function showToast(msg) {
+            const toast = document.getElementById('toast-notification');
+            document.getElementById('toast-message').textContent = msg;
+            toast.classList.remove('opacity-0');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('opacity-0');
+            }, 2600);
+        }
+
+        // 手機版初始載入時預設收合左側面板，保留寬廣地圖視野
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.innerWidth < 1024) {
+                toggleLeftPanel();
+            }
+            simulateTrafficUpdate(false);
+        });
+    </script>
+</body>
+</html>
