@@ -241,9 +241,10 @@ else unclassified++;
 }
 const zoom=map.getZoom();
 if(!passesFilter(seg)||!segmentInViewport(seg,viewport))return;
-// 全台總覽先顯示國道、省道；縣市道路放大至第 10 級才加入，避免低縮放時數千條市區道路擠在一起。
-// 原始資料與篩選不刪除，放大後仍會顯示完整可用路段。
-if(zoom<10&&seg.region!=='freeway'&&seg.region!=='highway')return;
+// 全台總覽只顯示國道，避免省道大量線段在手機小螢幕上形成白色路網。
+// 放大至道路層級後再逐步加入省道與縣市道路；原始資料不刪除。
+if(zoom<9&&seg.region!=='freeway')return;
+if(zoom<11&&seg.region!=='freeway'&&seg.region!=='highway')return;
 // Canvas 單層繪製，避免 SVG 與發光濾鏡造成額外重繪。
 const line=L.polyline(seg.coords,{renderer:map.getRenderer(map),color:style.color,weight:4,opacity:fresh?.92:.55,lineCap:'round',lineJoin:'round',interactive:true}).addTo(layers.traffic);
 line.bindPopup(`<div class="p-3.5"><div class="flex items-center justify-between gap-2 mb-2"><b class="text-xs text-cyan-300">${esc(seg.highwayName)}</b><span class="text-xs">${style.label}</span></div><h4 class="font-bold text-sm mb-2">${esc(seg.name)}</h4><div class="text-sm">車速：<b style="color:${style.color}">${fresh&&Number.isFinite(speed)?Math.round(speed)+' km/h':'待確認'}</b></div><div class="text-xs text-slate-400 mt-1">觀測時間：${esc(formatTime(seg.updateTime))}</div><div class="text-xs text-cyan-300 mt-1">官方分級：${esc(seg.congestionStatus||'未提供')}</div><div class="text-xs text-slate-500 mt-1">來源：${esc(seg.sourceLabel||'交通部 TDX')}</div></div>`);
