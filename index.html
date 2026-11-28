@@ -331,18 +331,36 @@ const popup=`<div class="p-3 min-w-52"><div class="flex items-center justify-bet
 marker.bindPopup(popup);
 });
 }
+// CCTV 使用單一 Canvas renderer 繪製圓點，避免每支攝影機建立獨立 DOM 圖示。
+const cctvCanvasRenderer=L.canvas({padding:0.5});
 function renderCctvLayer(){
 layers.cctv.clearLayers();
-// 全台總覽時不建立數千個 DOM marker；放大到道路層級才顯示 CCTV。
+// 全台總覽不繪製 CCTV；放大後只處理目前視窗內的攝影機。
 if(map.getZoom()<10)return;
-liveCctv.forEach(cam=>{
-if(!Number.isFinite(cam.lat)||!Number.isFinite(cam.lng))return;
-const icon=L.divIcon({className:'custom-cctv-marker',html:'<div class="w-7 h-7 rounded-lg bg-slate-900 border border-sky-400 shadow-lg flex items-center justify-center text-sky-400"><i class="fa-solid fa-video text-xs"></i></div>',iconSize:[28,28],iconAnchor:[14,14]});
-const marker=L.marker([cam.lat,cam.lng],{icon}).addTo(layers.cctv);
+const bounds=map.getBounds();
+const visible=liveCctv.filter(cam=>
+Number.isFinite(cam.lat)&&Number.isFinite(cam.lng)&&bounds.contains([cam.lat,cam.lng])
+);
+// 極密集區域限制同時繪製數量，避免低階手機因大量互動圖徵卡頓。
+const maxVisible=650;
+const step=Math.max(1,Math.ceil(visible.length/maxVisible));
+for(let i=0;i<visible.length;i+=step){
+const cam=visible[i];
+const marker=L.circleMarker([cam.lat,cam.lng],{
+renderer:cctvCanvasRenderer,
+radius:4,
+color:'#bae6fd',
+weight:1.5,
+opacity:0.95,
+fillColor:'#0284c7',
+fillOpacity:0.95,
+interactive:true,
+bubblingMouseEvents:false
+}).addTo(layers.cctv);
 const media=cam.imageUrl?'<img src="'+esc(cam.imageUrl)+'" alt="CCTV 即時影像" class="w-full rounded-lg mt-2" loading="lazy">':'';
 const link=cam.streamUrl?'<a href="'+esc(cam.streamUrl)+'" target="_blank" rel="noopener" class="inline-block mt-2 text-cyan-300 underline">開啟官方影像</a>':'<div class="text-xs text-slate-400 mt-2">官方資料未提供可直接播放的影像網址</div>';
 marker.bindPopup('<div class="p-3"><b class="text-sm">'+esc(cam.name)+'</b><div class="text-xs text-slate-400 mt-1">'+esc(cam.direction||'')+'</div>'+media+link+'<div class="text-[10px] text-slate-500 mt-2">來源：TDX CCTV</div></div>');
-});
+}
 }
 map.on('zoomend',()=>{renderCctvLayer();renderVDLayer();});
 // 拖曳/縮放結束後才重繪可視範圍路段，避免每一個移動影格都觸發大量計算。
