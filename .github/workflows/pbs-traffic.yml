@@ -24,7 +24,7 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout latest main
         uses: actions/checkout@v4
@@ -35,8 +35,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependency
-        run: python -m pip install --disable-pip-version-check requests
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check requests playwright
+          python -m playwright install --with-deps chromium
       - name: Fetch official PBS traffic (keep previous snapshot on failure)
         run: python scripts/fetch_pbs_traffic.py
       - name: Commit snapshot
