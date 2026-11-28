@@ -851,10 +851,7 @@ def summarize_vd_live(live):
 
 
 def fetch_vd_layer(bearer, static_cache):
-    """Fetch official VD locations (daily static) and one-minute lane observations."""
-    # Use the ten city values already verified by the live-road endpoints, plus
-    # national highway/freeway sources. Unsupported city endpoints are reported,
-    # never replaced with guessed or simulated detector locations.
+    """Fetch official static VD locations. Live observations require a per-device VDID endpoint."""
     sources = [(code, name, "city") for code, name, _region in LIVE_CITIES]
     sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
     devices = {}
@@ -863,17 +860,9 @@ def fetch_vd_layer(bearer, static_cache):
 
     for code, label, source_type in sources:
         static_path = f"Road/Traffic/VD/{'City/' if source_type == 'city' else ''}{code}"
-        live_path = f"Road/Traffic/Live/VD/{'City/' if source_type == 'city' else ''}{code}"
         try:
             static_rows = cached_static_rows(static_path, bearer, static_cache)
-            live_rows = rows(live_path, bearer)
-            live_by_id = {
-                str(item.get("VDID") or "").strip(): item
-                for item in live_rows
-                if isinstance(item, dict) and str(item.get("VDID") or "").strip()
-            }
             valid_static = 0
-            matched_live = 0
             for item in static_rows:
                 if not isinstance(item, dict):
                     continue
@@ -882,14 +871,9 @@ def fetch_vd_layer(bearer, static_cache):
                 if not vd_id or not point:
                     continue
                 valid_static += 1
-                live = live_by_id.get(vd_id)
-                summary = summarize_vd_live(live) if live else {}
-                if live:
-                    matched_live += 1
                 key = f"{source_type}:{code}:{vd_id}"
-                existing = devices.get(key, {})
+                links = collection_items(item.get("DetectionLinks"), "DetectionLink")
                 devices[key] = {
-                    **existing,
                     "id": vd_id,
                     "sourceType": source_type,
                     "sourceCode": code,
@@ -899,7 +883,7 @@ def fetch_vd_layer(bearer, static_cache):
                     "roadSection": item.get("RoadSection") or "",
                     "direction": ", ".join(dict.fromkeys(
                         str(link.get("RoadDirection") or link.get("Bearing") or "").strip()
-                        for link in collection_items(item.get("DetectionLinks"), "DetectionLink")
+                        for link in links
                         if link.get("RoadDirection") or link.get("Bearing")
                     )),
                     "lat": point[0],
@@ -914,17 +898,23 @@ def fetch_vd_layer(bearer, static_cache):
                             "roadDirection": str(link.get("RoadDirection") or ""),
                             "laneNum": link.get("LaneNum")
                         }
-                        for link in collection_items(item.get("DetectionLinks"), "DetectionLink")
+                        for link in links
                     ],
-                    **summary
+                    "status": None,
+                    "speed": None,
+                    "occupancy": None,
+                    "volumePerMinute": None,
+                    "vehicleVolumes": None,
+                    "laneCount": None,
+                    "dataCollectTime": ""
                 }
             stats.append({
                 "code": code, "name": label, "type": source_type,
                 "staticRecords": len(static_rows), "validDevices": valid_static,
-                "liveRecords": len(live_rows), "matchedLive": matched_live,
+                "liveRecords": 0, "matchedLive": 0, "staticOnly": True,
                 "ok": True
             })
-            print(f"[VD] {label}: static={len(static_rows)} mapped={valid_static} live={len(live_rows)} matched={matched_live}")
+            print(f"[VD] {label}: static={len(static_rows)} mapped={valid_static}; live data is fetched separately by VDID")
         except Exception as exc:
             stats.append({
                 "code": code, "name": label, "type": source_type,
@@ -933,19 +923,19 @@ def fetch_vd_layer(bearer, static_cache):
             print(f"[VD WARN] {label}: {exc}", file=sys.stderr)
 
     payload = {
-        "source": "交通部 TDX 路況資訊 v2 VD 車輛偵測器",
+        "source": "交通部 TDX 路況資訊 v2 VD 靜態設備位置",
         "generatedAt": now.isoformat(timespec="seconds"),
-        "updateIntervalSeconds": 60,
+        "updateIntervalSeconds": 86400,
         "totalDevices": len(devices),
-        "liveDevices": sum(1 for item in devices.values() if item.get("dataCollectTime")),
+        "liveDevices": 0,
+        "liveDataStatus": "尚未逐設備取得動態資料；不得將靜態設備位置視為即時車流",
         "sources": stats,
         "devices": list(devices.values())
     }
     os.makedirs("data", exist_ok=True)
     with open("data/tdx-vd.json", "w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, separators=(",", ":"))
-    print(f"[VD] saved {len(devices)} official detector locations.")
-
+    print(f"[VD] saved {len(devices)} official static detector locations.")
 
 def main():
     bearer=token()
