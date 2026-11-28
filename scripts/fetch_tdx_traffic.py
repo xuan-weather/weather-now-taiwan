@@ -317,9 +317,13 @@ def extract_link_ids(value):
     def walk(node):
         if isinstance(node, dict):
             if node.get("LinkID") is not None:
-                found.append(str(node["LinkID"]).strip())
-            else:
-                for child in node.values():
+                value=node["LinkID"]
+                if isinstance(value, (dict, list, tuple)):
+                    walk(value)
+                else:
+                    found.append(str(value).strip())
+            for key, child in node.items():
+                if key != "LinkID":
                     walk(child)
         elif isinstance(node, (list, tuple)):
             for child in node:
