@@ -20,20 +20,55 @@ MIN_REQUEST_INTERVAL = 12.0  # 降低 429；線型資料另做 7 天快取，減
 _last_request_at = 0.0
 
 # TDX 各路況端點的 City enum 不相同，依錯誤回應列出的清單分開設定。
+# TDX 縣市即時路況 API 與 SectionShape API 的正式 City 代碼。
+# 22 個縣市逐一請求；來源成功僅代表 API 可正常回應，不代表該縣市每條道路都有偵測器。
 LIVE_CITIES = [
-    ("YilanCounty","宜蘭縣","yilan"),("MiaoliCounty","苗栗縣","miaoli"),
-    ("ChanghuaCounty","彰化縣","changhua"),("YunlinCounty","雲林縣","yunlin"),
-    ("PingtungCounty","屏東縣","pingtung"),("Keelung","基隆市","keelung"),
-    ("Taipei","臺北市","taipei"),("Taichung","臺中市","taichung"),
-    ("Tainan","臺南市","tainan"),("Taoyuan","桃園市","taoyuan")
+    ("Taipei","臺北市","taipei"),
+    ("NewTaipei","新北市","new_taipei"),
+    ("Keelung","基隆市","keelung"),
+    ("Taoyuan","桃園市","taoyuan"),
+    ("Hsinchu","新竹市","hsinchu"),
+    ("HsinchuCounty","新竹縣","hsinchu_county"),
+    ("MiaoliCounty","苗栗縣","miaoli"),
+    ("Taichung","臺中市","taichung"),
+    ("ChanghuaCounty","彰化縣","changhua"),
+    ("NantouCounty","南投縣","nantou"),
+    ("YunlinCounty","雲林縣","yunlin"),
+    ("Chiayi","嘉義市","chiayi"),
+    ("ChiayiCounty","嘉義縣","chiayi_county"),
+    ("Tainan","臺南市","tainan"),
+    ("Kaohsiung","高雄市","kaohsiung"),
+    ("PingtungCounty","屏東縣","pingtung"),
+    ("YilanCounty","宜蘭縣","yilan"),
+    ("HualienCounty","花蓮縣","hualien"),
+    ("TaitungCounty","臺東縣","taitung"),
+    ("PenghuCounty","澎湖縣","penghu"),
+    ("KinmenCounty","金門縣","kinmen"),
+    ("LienchiangCounty","連江縣","lienchiang")
 ]
 SHAPE_CITIES = [
-    ("YilanCounty","宜蘭縣","yilan"),("HsinchuCounty","新竹縣","hsinchu_county"),
-    ("MiaoliCounty","苗栗縣","miaoli"),("YunlinCounty","雲林縣","yunlin"),
-    ("PingtungCounty","屏東縣","pingtung"),("Keelung","基隆市","keelung"),
-    ("Taipei","臺北市","taipei"),("Kaohsiung","高雄市","kaohsiung"),
-    ("Taichung","臺中市","taichung"),("Tainan","臺南市","tainan"),
-    ("Taoyuan","桃園市","taoyuan")
+    ("Taipei","臺北市","taipei"),
+    ("NewTaipei","新北市","new_taipei"),
+    ("Keelung","基隆市","keelung"),
+    ("Taoyuan","桃園市","taoyuan"),
+    ("Hsinchu","新竹市","hsinchu"),
+    ("HsinchuCounty","新竹縣","hsinchu_county"),
+    ("MiaoliCounty","苗栗縣","miaoli"),
+    ("Taichung","臺中市","taichung"),
+    ("ChanghuaCounty","彰化縣","changhua"),
+    ("NantouCounty","南投縣","nantou"),
+    ("YunlinCounty","雲林縣","yunlin"),
+    ("Chiayi","嘉義市","chiayi"),
+    ("ChiayiCounty","嘉義縣","chiayi_county"),
+    ("Tainan","臺南市","tainan"),
+    ("Kaohsiung","高雄市","kaohsiung"),
+    ("PingtungCounty","屏東縣","pingtung"),
+    ("YilanCounty","宜蘭縣","yilan"),
+    ("HualienCounty","花蓮縣","hualien"),
+    ("TaitungCounty","臺東縣","taitung"),
+    ("PenghuCounty","澎湖縣","penghu"),
+    ("KinmenCounty","金門縣","kinmen"),
+    ("LienchiangCounty","連江縣","lienchiang")
 ]
 LIVE_BY_CODE = {item[0]: item for item in LIVE_CITIES}
 SHAPE_BY_CODE = {item[0]: item for item in SHAPE_CITIES}
@@ -741,6 +776,25 @@ def main():
         "officialDataAt":official_data_at,
         "totalSegments":len(all_segments),
         "officialClassifiedSegments":sum(1 for item in all_segments if item.get("congestionStatus") not in ("官方分級未提供", "官方分級未識別")),
+        "cityCoverage":{
+            "expected":len(LIVE_CITIES),
+            "configured":len(CITY_PAIRS),
+            "successful":sum(1 for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES} and item.get("ok") is True),
+            "cities":[
+                {
+                    "name":item.get("name"),
+                    "ok":item.get("ok") is True,
+                    "liveRecords":item.get("liveRecords",0),
+                    "shapeRecords":item.get("shapeRecords",0),
+                    "mappedSegments":item.get("mappedSegments",0),
+                    "mappingRate":item.get("mappingRate",0),
+                    "hasLiveData":item.get("liveRecords",0)>0,
+                    "hasMappedRoads":item.get("mappedSegments",0)>0,
+                    "error":item.get("error")
+                }
+                for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES}
+            ]
+        },
         "segments":all_segments,
         "sources":stats
     }
