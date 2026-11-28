@@ -297,8 +297,7 @@ def section_id(item):
 def geometry_points(item):
     geom = item.get("Geometry") or item.get("geometry") or item.get("WKT")
     if isinstance(geom, dict):
-        kind = str(geom.get("type", "")).lower()
-        raw = geom.get("coordinates", [])
+        kind = str(geom.get("type", "")).lower()        raw = geom.get("coordinates", [])
         if kind == "linestring":
             lines = [raw]
         elif kind == "multilinestring":
@@ -597,8 +596,7 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
         if speed is None:
             # 保留有官方路段線型、但當下沒有有效車速的資料；前端以灰色顯示，不推算或補造車速。
             if diag is not None: diag["skippedNoSpeed"]+=1
-            status, level_number, level_name = "資料不足", None, None
-        else:
+            status, level_number, level_name = "資料不足", None, None        else:
             status, level_number, level_name = official_congestion_status(item, definition, speed)
         for sid in section_ids:
             coords=shape_by_id.get(sid)
@@ -897,8 +895,7 @@ def summarize_vd_live(live):
     # TDX v2 部分資料以 VDID + LinkID + LaneID 的扁平車道欄位回傳，
     # 另一些端點則使用 LinkFlows/Lanes 巢狀結構；兩種格式都讀取官方 Speed。
     if not lane_speeds and not vehicle_speeds:
-        top_raw_speed = field_value(live, *lane_speed_keys)
-        if top_raw_speed is not None:
+        top_raw_speed = field_value(live, *lane_speed_keys)        if top_raw_speed is not None:
             raw_speed_values.append(top_raw_speed)
         top_speed = number_or_none(top_raw_speed, 0, 200)
         if top_speed is not None:
@@ -1193,12 +1190,11 @@ def main():
     level_cache = load_congestion_cache()
     section_cache = load_supplemental_cache()
     # 即時車速每輪重新抓取；道路線型快取 7 天，官方分級定義快取 24 小時。
-    for live_city, shape_city in CITY_PAIRS:
+    # 優先取得全國性省道／國道即時車速，再處理縣市道路與靜態線型對照。\n    for live_city, shape_city in CITY_PAIRS:
         city_code, label, region = live_city
         try:
             live = rows(f"Road/Traffic/Live/City/{city_code}", bearer)
-            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer, shape_cache)
-            shape_ids={section_id(item) for item in shapes if section_id(item)}
+            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer, shape_cache)            shape_ids={section_id(item) for item in shapes if section_id(item)}
             direct_ids={section_id(item) for item in live if section_id(item)}
             # TDX 標準允許即時資料以 SectionID 或 LinkIDs 表示路段。
             # 只有在即時資料無法直接對上線型時，才額外取 SectionLink 對照表。
@@ -1244,11 +1240,14 @@ def main():
     save_shape_cache(shape_cache)
     save_congestion_cache(level_cache)
     save_supplemental_cache(section_cache)
-    if mode != "--skip-vd":
+    if mode not in ("--skip-vd", "--traffic-only"):
         vd_static_cache = load_supplemental_cache(VD_STATIC_CACHE_PATH)
         fetch_vd_layer(bearer, vd_static_cache)
         save_supplemental_cache(vd_static_cache, VD_STATIC_CACHE_PATH)
-    fetch_supplemental_layers(bearer)
+    if mode != "--traffic-only":
+        fetch_supplemental_layers(bearer)
+    else:
+        print("[TRAFFIC] Skip VD and supplementary layers; they are refreshed by independent workflows.")
     generated_at = datetime.now(TW)
     # 以各路段來源提供的觀測時間計算最新官方資料時間；
     # generatedAt 則保留為本次 JSON 快照產生時間，兩者不可混用。
