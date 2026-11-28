@@ -1,6 +1,8 @@
 name: Update Nationwide TDX Traffic
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/20 * * * *"
   push:
     branches: [main]
     paths:
@@ -35,7 +37,7 @@ jobs:
           DATA_DIR="$(mktemp -d)"
           cp data/tdx-traffic.json "$DATA_DIR/"
           cp data/tdx-shapes-cache.json "$DATA_DIR/"
-          cp data/tdx-congestion-definitions.json "$DATA_DIR/"\n          cp data/tdx-layers.json "$DATA_DIR/"\n          cp data/tdx-layers-cache.json "$DATA_DIR/"
+          cp data/tdx-congestion-definitions.json "$DATA_DIR/"
 
           for attempt in 1 2 3; do
             echo "Sync and push attempt $attempt/3"
@@ -81,7 +83,7 @@ jobs:
 
             cp "$DATA_DIR/tdx-traffic.json" data/
             cp "$DATA_DIR/tdx-shapes-cache.json" data/
-            cp "$DATA_DIR/tdx-congestion-definitions.json" data/\n            cp "$DATA_DIR/tdx-layers.json" data/\n            cp "$DATA_DIR/tdx-layers-cache.json" data/
+            cp "$DATA_DIR/tdx-congestion-definitions.json" data/
 
             # Stage refreshed files before checking whether there are changes.
             git add data/tdx-traffic.json data/tdx-shapes-cache.json data/tdx-congestion-definitions.json
