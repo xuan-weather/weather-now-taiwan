@@ -177,13 +177,17 @@ def rows_v1(path, bearer):
         time.sleep(0.6)
 
 def find_feed_metadata(payload):
-    metadata = {"updateTime": "", "authorityCode": ""}
+    metadata = {"updateTime": "", "srcUpdateTime": "", "authorityCode": ""}
     def walk(node):
         if isinstance(node, dict):
             if not metadata["updateTime"]:
                 value = node.get("UpdateTime") or node.get("updateTime")
                 if isinstance(value, str) and value.strip():
                     metadata["updateTime"] = value.strip()
+            if not metadata["srcUpdateTime"]:
+                value = node.get("SrcUpdateTime") or node.get("srcUpdateTime")
+                if isinstance(value, str) and value.strip():
+                    metadata["srcUpdateTime"] = value.strip()
             if not metadata["authorityCode"]:
                 value = node.get("AuthorityCode") or node.get("authorityCode")
                 if isinstance(value, str) and value.strip():
@@ -217,6 +221,9 @@ def rows(path, bearer):
             if isinstance(item, dict):
                 if feed_time and not any(item.get(key) for key in ("DataCollectTime", "SrcUpdateTime", "UpdateTime", "updateTime")):
                     item["_FeedUpdateTime"] = feed_time
+                feed_src_time = feed_metadata.get("srcUpdateTime", "")
+                if feed_src_time and not any(item.get(key) for key in ("DataCollectTime", "SrcUpdateTime", "UpdateTime", "updateTime", "_FeedUpdateTime")):
+                    item["_FeedSrcUpdateTime"] = feed_src_time
                 if feed_metadata["authorityCode"] and not item.get("AuthorityCode"):
                     item["_FeedAuthorityCode"] = feed_metadata["authorityCode"]
         result.extend(batch)
@@ -907,8 +914,11 @@ def summarize_vd_live(live):
     else:
         speed = None
         speed_source = "unavailable"
+    # TDX 部分端點會在資料集層提供 SrcUpdateTime，而單筆 VDLive 未必帶 DataCollectTime。
+    # 僅在設備本身沒有時間戳時才回退到來源時間，避免用整批更新時間覆蓋較舊的設備觀測時間。
     data_time = (live.get("DataCollectTime") or live.get("UpdateTime")
-                 or live.get("_FeedUpdateTime") or "")
+                 or live.get("SrcUpdateTime") or live.get("_FeedUpdateTime")
+                 or live.get("_FeedSrcUpdateTime") or "")
     return {
         "linkIds": link_ids,
         "laneCount": lane_count,
