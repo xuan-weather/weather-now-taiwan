@@ -7,8 +7,8 @@ on:
       - "scripts/fetch_tdx_traffic.py"
       - ".github/workflows/tdx-traffic.yml"
   schedule:
-    # TDX API traffic collection: every 30 minutes, staggered from supplementary layers.
-    - cron: "5,35 * * * *"
+    # GitHub Actions minimum schedule interval is 5 minutes; source feed itself updates every 1 minute.
+    - cron: "*/5 * * * *"
 permissions:
   contents: write
 concurrency:
