@@ -266,7 +266,11 @@ marker.bindPopup(`<div class="p-3.5"><span class="text-xs font-bold" style="colo
 evt.leafletMarker=marker;
 });
 const cityCoverage=sourceMeta.cityCoverage||{},cityOk=Number(cityCoverage.successful)||0,cityConfigured=Number(cityCoverage.configured)||0,cityLiveEndpoint=Number(cityCoverage.supportedLiveEndpoint)||0,cityShapeEndpoint=Number(cityCoverage.supportedShapeEndpoint)||0,cityExpected=Number(cityCoverage.expected)||22;
-document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${freshCount} / ${roadSegments.length} 段｜分級待確認 ${unclassified}｜縣市可畫線 ${cityOk}/${cityExpected}・可配對 ${cityConfigured}/${cityExpected}・TDX Live/Shape 支援 ${cityLiveEndpoint}/${cityShapeEndpoint} 市`;
+const citySchemaReady=Number.isFinite(Number(cityCoverage.supportedLiveEndpoint))&&Number.isFinite(Number(cityCoverage.supportedShapeEndpoint))&&Array.isArray(cityCoverage.cities);
+const cityStatusText=citySchemaReady
+?`縣市可畫線 ${cityOk}/${cityExpected}・可配對 ${cityConfigured}/${cityExpected}・TDX Live/Shape 支援 ${cityLiveEndpoint}/${cityShapeEndpoint} 市`
+:'縣市覆蓋統計待新版資料更新（舊快照不列入）';
+document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${freshCount} / ${roadSegments.length} 段｜分級待確認 ${unclassified}｜${cityStatusText}`;
 document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
 renderCctvLayer();
 }
