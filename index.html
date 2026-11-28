@@ -172,9 +172,19 @@
   <!-- =========================================================
        左上角：極簡搜尋與地區快速跳轉懸浮框
   ========================================================= -->
-  <div class="fixed top-3 left-3 sm:top-4 sm:left-4 z-[1000] flex flex-col gap-2 max-w-[calc(100vw-88px)] sm:max-w-sm w-full pointer-events-none">
+  <div class="fixed top-3 left-3 sm:top-4 sm:left-4 z-[1000] flex flex-col gap-2 w-[calc(100vw-104px)] max-w-[520px] pointer-events-none">
+    <!-- 漢堡選單＋搜尋列：手機版保留右側圖層按鈕空間 -->
+    <div class="flex items-center gap-2 pointer-events-auto">
+      <button id="quick-menu-toggle" type="button" onclick="toggleQuickMenu()"
+        aria-label="開啟功能選單" aria-expanded="false"
+        class="glass-panel w-11 h-11 rounded-2xl shrink-0 flex items-center justify-center text-slate-200 hover:bg-white/15 active:scale-95 transition">
+        <svg id="quick-menu-icon" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <div class="min-w-0 flex-1">
     <!-- 搜尋與即時狀態膠囊 -->
-    <div id="top-search-box" class="glass-panel rounded-2xl p-2 flex items-center gap-2 pointer-events-auto">
+    <div id="top-search-box" class="glass-panel rounded-2xl p-2 flex items-center gap-2 pointer-events-auto min-w-0">
       <div class="flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
@@ -194,6 +204,25 @@
           </svg>
         </button>
       </div>
+    </div>
+      </div>
+    </div>
+
+    <!-- 左上角快速功能選單 -->
+    <div id="quick-menu-panel" class="hidden glass-panel rounded-2xl p-2 w-52 pointer-events-auto">
+      <div class="px-2 py-1.5 text-[11px] font-semibold tracking-wide text-slate-400">快速功能</div>
+      <button type="button" onclick="flyToRegion('taiwan');toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
+        <span class="text-emerald-400">⌖</span><span>全台路網總覽</span>
+      </button>
+      <button type="button" onclick="locateUser();toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
+        <span class="text-sky-400">◎</span><span>定位目前位置</span>
+      </button>
+      <button type="button" onclick="toggleLayerPanel(true);toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
+        <span class="text-indigo-300">▦</span><span>即時資訊圖層</span>
+      </button>
+      <button type="button" onclick="toggleReportMode();toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
+        <span class="text-amber-400">⚑</span><span>通報新路況</span>
+      </button>
     </div>
 
     <!-- 搜尋建議下拉清單 -->
@@ -1087,7 +1116,12 @@
     // =========================================================================
     // 7. 互動控制：圖層切換、底圖切換、城市跳轉與搜尋
     // =========================================================================
-    function toggleLayerPanel() {
+    function toggleLayerPanel(forceOpen) {
+      const panel = document.getElementById('layer-panel');
+      if (typeof forceOpen === 'boolean') {
+        panel.classList.toggle('hidden', !forceOpen);
+        return;
+      }
       const panel = document.getElementById('layer-panel');
       panel.classList.toggle('hidden');
     }
@@ -1156,6 +1190,312 @@
       kinmen: { center: [24.4408, 118.3183], zoom: 11, label: '金門縣' },
       lienchiang: { center: [26.1605, 119.9517], zoom: 11, label: '連江縣' }
     };
+
+    function toggleQuickMenu(forceState) {
+      const panel = document.getElementById('quick-menu-panel');
+      const button = document.getElementById('quick-menu-toggle');
+      if (!panel || !button) return;
+      const shouldOpen = typeof forceState === 'boolean' ? forceState : panel.classList.contains('hidden');
+      panel.classList.toggle('hidden', !shouldOpen);
+      button.setAttribute('aria-expanded', String(shouldOpen));
+      button.setAttribute('aria-label', shouldOpen ? '關閉功能選單' : '開啟功能選單');
+    }
+
+    function flyToRegion(key) {
+      const target = regions[key];
+      if (!target) return;
+      map.flyTo(target.center, target.zoom, { duration: 1.1 });
+      const selector = document.getElementById('region-select');
+      if (selector && selector.value !== key) selector.value = key;
+      document.querySelectorAll('.region-btn').forEach(btn => {
+        const active = btn.dataset.region === key;
+        btn.classList.toggle('active-region', active);
+        if (active) {
+          btn.classList.add('bg-sky-500', 'text-white', 'shadow-lg', 'shadow-sky-500/30');
+          btn.classList.remove('glass-panel', 'glass-panel-light');
+        } else {
+          btn.classList.remove('bg-sky-500', 'text-white', 'shadow-lg', 'shadow-sky-500/30');
+          btn.classList.add(currentBaseMap === 'light' ? 'glass-panel-light' : 'glass-panel');
+        }
+      });
+    }
+
+    // 搜尋功能
+    const searchInput = document.getElementById('road-search-input');
+    const searchResults = document.getElementById('search-results');
+    const clearSearchBtn = document.getElementById('clear-search-btn');
+
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      clearSearchBtn.classList.toggle('hidden', q.length === 0);
+
+      if (!q) {
+        searchResults.classList.add('hidden');
+        return;
+      }
+
+      const matches = [];
+      roadSegments.forEach(s => {
+        if (s.name.toLowerCase().includes(q)) {
+          const mid = s.coords[Math.floor(s.coords.length / 2)];
+          matches.push({ title: s.name, sub: `即時車速 ${s.speed} km/h`, lat: mid[0], lng: mid[1], zoom: 15, tag: '路段' });
+        }
+      });
+      incidentsData.forEach(inc => {
+        if (inc.title.toLowerCase().includes(q) || inc.desc.toLowerCase().includes(q)) {
+          matches.push({ title: inc.title, sub: inc.lane, lat: inc.lat, lng: inc.lng, zoom: 16, tag: '事件' });
+        }
+      });
+      cctvData.forEach(cam => {
+        if (cam.name.toLowerCase().includes(q)) {
+          matches.push({ title: cam.name, sub: cam.flow, lat: cam.lat, lng: cam.lng, zoom: 16, tag: 'CCTV' });
+        }
+      });
+
+      if (matches.length === 0) {
+        searchResults.innerHTML = `<div class="p-2.5 text-slate-400 text-center">找不到符合「${e.target.value}」的路段或事件</div>`;
+      } else {
+        searchResults.innerHTML = matches.map(m => `
+          <button onclick="selectSearchResult(${m.lat}, ${m.lng}, ${m.zoom})" class="w-full text-left p-2 rounded-xl hover:bg-white/10 flex items-center justify-between gap-2 transition">
+            <div class="min-w-0">
+              <div class="font-medium truncate">${m.title}</div>
+              <div class="text-[10px] text-slate-400 truncate">${m.sub}</div>
+            </div>
+            <span class="px-1.5 py-0.5 text-[10px] rounded bg-sky-500/20 text-sky-300 shrink-0">${m.tag}</span>
+          </button>
+        `).join('');
+      }
+      searchResults.classList.remove('hidden');
+    });
+
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      clearSearchBtn.classList.add('hidden');
+      searchResults.classList.add('hidden');
+    });
+
+    function selectSearchResult(lat, lng, zoom) {
+      map.flyTo([lat, lng], zoom, { duration: 1 });
+      searchResults.classList.add('hidden');
+    }
+
+    // 定位使用者位置
+    let userLocationMarker = null;
+    function locateUser() {
+      if (!navigator.geolocation) {
+        showToast('您的瀏覽器不支援地理定位功能');
+        return;
+      }
+      showToast('正在取得您的目前位置...');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          map.flyTo([latitude, longitude], 15, { duration: 1.2 });
+
+          if (userLocationMarker) map.removeLayer(userLocationMarker);
+          const userIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `
+              <div class="relative flex items-center justify-center w-6 h-6">
+                <span class="marker-pulse absolute inset-0 rounded-full bg-sky-400"></span>
+                <span class="relative w-3.5 h-3.5 rounded-full bg-sky-500 border-2 border-white shadow"></span>
+              </div>
+            `,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          });
+          userLocationMarker = L.marker([latitude, longitude], { icon: userIcon })
+            .bindPopup('<div class="text-xs font-bold p-1">📍 您的目前位置</div>')
+            .addTo(map);
+          showToast('已定位至您的目前位置');
+        },
+        () => {
+          // 若未授權定位，平滑導回高雄三民區預設中心
+          flyToRegion('kaohsiung');
+          showToast('無法取得 GPS 權限，已為您聚焦高雄市三民區');
+        },
+        { timeout: 6000 }
+      );
+    }
+
+    // =========================================================================
+    // 8. 模擬通報新路況功能
+    // =========================================================================
+    let isReportMode = false;
+    let pendingReportLatLng = null;
+
+    function toggleReportMode(forceState) {
+      isReportMode = typeof forceState === 'boolean' ? forceState : !isReportMode;
+      const banner = document.getElementById('report-banner');
+      const mapEl = document.getElementById('map');
+
+      if (isReportMode) {
+        banner.classList.remove('hidden');
+        mapEl.style.cursor = 'crosshair';
+        // 手機版自動收合圖層面板避免遮擋
+        if (window.innerWidth < 640) {
+          document.getElementById('layer-panel').classList.add('hidden');
+        }
+      } else {
+        banner.classList.add('hidden');
+        mapEl.style.cursor = '';
+      }
+    }
+
+    map.on('click', (e) => {
+      if (!isReportMode) return;
+      pendingReportLatLng = e.latlng;
+      document.getElementById('report-coords-label').textContent =
+        `座標：${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+      document.getElementById('report-modal').classList.remove('hidden');
+      toggleReportMode(false);
+    });
+
+    function closeReportModal() {
+      document.getElementById('report-modal').classList.add('hidden');
+      pendingReportLatLng = null;
+    }
+
+    function submitNewReport() {
+      if (!pendingReportLatLng) return;
+      const type = document.getElementById('report-type').value;
+      const titleInput = document.getElementById('report-title').value.trim();
+      const descInput = document.getElementById('report-desc').value.trim();
+
+      const newIncident = {
+        id: 'inc-' + Date.now(),
+        type,
+        title: titleInput || '民眾回報即時路況事件',
+        desc: descInput || '現場車流放慢，請用路人小心駕駛並注意前方車況。',
+        time: '剛剛通報',
+        lane: '現場警戒中',
+        lat: pendingReportLatLng.lat,
+        lng: pendingReportLatLng.lng
+      };
+
+      incidentsData.push(newIncident);
+      document.getElementById('chk-incidents').checked = true;
+      toggleMapLayer('incidents', true);
+      renderIncidents();
+
+      // 清空表單並關閉
+      document.getElementById('report-title').value = '';
+      document.getElementById('report-desc').value = '';
+      closeReportModal();
+      showToast('✅ 感謝回報！新路況標記已同步至地圖');
+    }
+
+    // 輕量提示框
+    let toastTimeout = null;
+    function showToast(text) {
+      const toast = document.getElementById('toast-msg');
+      toast.firstElementChild.textContent = text;
+      toast.classList.remove('opacity-0');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.add('opacity-0');
+      }, 2800);
+    }
+
+    // =========================================================================
+    // 9. 啟動初始化
+    // =========================================================================
+    window.addEventListener('load', () => {
+      renderTrafficNetwork();
+      renderIncidents();
+      renderCCTV();
+      renderParking();
+      updateLayerCounts();
+      loadSupplementalTrafficLayers();
+      setInterval(loadSupplementalTrafficLayers, 5 * 60 * 1000);
+      updateClockLabel();
+      loadTdxTrafficData(false);
+      autoSimTimer = setInterval(() => loadTdxTrafficData(false), 5 * 60 * 1000);
+      // iPhone Safari 首屏尺寸穩定後重新計算 Leaflet 地圖尺寸
+      requestAnimationFrame(() => map.invalidateSize(true));
+    });
+  </script>
+</body>
+</html>
+
+      const panel = document.getElementById('layer-panel');
+      panel.classList.toggle('hidden');
+    }
+
+    function toggleMapLayer(layerKey, visible) {
+      if (visible) {
+        map.addLayer(layers[layerKey]);
+      } else {
+        map.removeLayer(layers[layerKey]);
+      }
+      // 更新啟用圖層計數徽章
+      const count = ['chk-traffic', 'chk-incidents', 'chk-cctv', 'chk-parking']
+        .filter(id => document.getElementById(id).checked).length;
+      document.getElementById('active-layer-badge').textContent = count;
+    }
+
+    function switchBaseMap(type) {
+      if (!baseLayers[type]) return;
+      Object.values(baseLayers).forEach(layer => {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+      });
+      baseLayers[type].addTo(map);
+      currentBaseMap = type;
+
+      ['dark', 'light', 'satellite'].forEach(key => {
+        const btn = document.getElementById(`base-${key}`);
+        if (!btn) return;
+        btn.className = key === type
+          ? 'base-btn py-1.5 px-2 rounded-xl bg-sky-500 text-white text-center transition'
+          : 'base-btn py-1.5 px-2 rounded-xl bg-white/10 hover:bg-white/20 text-center transition';
+      });
+
+      document.querySelectorAll('.glass-panel, .glass-panel-light').forEach(panel => {
+        panel.classList.toggle('glass-panel-light', type === 'light');
+        panel.classList.toggle('glass-panel', type !== 'light');
+      });
+      const selector = document.getElementById('region-select');
+      if (selector) {
+        selector.style.color = type === 'light' ? '#0f172a' : '#f8fafc';
+        selector.style.backgroundColor = type === 'light' ? 'rgba(255,255,255,.92)' : 'rgba(15,23,42,.92)';
+      }
+    }
+
+    const regions = {
+      taiwan: { center: [23.7500, 120.9500], zoom: 7, label: '全台灣道路總覽' },
+      taipei: { center: [25.0375, 121.5637], zoom: 12, label: '臺北市' },
+      newtaipei: { center: [25.0169, 121.4628], zoom: 10, label: '新北市' },
+      keelung: { center: [25.1276, 121.7392], zoom: 12, label: '基隆市' },
+      taoyuan: { center: [24.9937, 121.3009], zoom: 11, label: '桃園市' },
+      hsinchu_city: { center: [24.8017, 120.9714], zoom: 13, label: '新竹市' },
+      hsinchu_county: { center: [24.7033, 121.1252], zoom: 10, label: '新竹縣' },
+      yilan: { center: [24.7021, 121.7378], zoom: 10, label: '宜蘭縣' },
+      taichung: { center: [24.1477, 120.6736], zoom: 11, label: '臺中市' },
+      miaoli: { center: [24.5602, 120.8214], zoom: 10, label: '苗栗縣' },
+      changhua: { center: [24.0518, 120.5161], zoom: 10, label: '彰化縣' },
+      nantou: { center: [23.9609, 120.9719], zoom: 10, label: '南投縣' },
+      yunlin: { center: [23.7092, 120.4313], zoom: 10, label: '雲林縣' },
+      chiayi_city: { center: [23.4801, 120.4491], zoom: 13, label: '嘉義市' },
+      chiayi_county: { center: [23.4589, 120.2930], zoom: 10, label: '嘉義縣' },
+      tainan: { center: [22.9999, 120.2269], zoom: 11, label: '臺南市' },
+      kaohsiung: { center: [22.6273, 120.3014], zoom: 11, label: '高雄市' },
+      pingtung: { center: [22.5519, 120.5487], zoom: 10, label: '屏東縣' },
+      hualien: { center: [23.9872, 121.6015], zoom: 10, label: '花蓮縣' },
+      taitung: { center: [22.7583, 121.1444], zoom: 10, label: '臺東縣' },
+      penghu: { center: [23.5711, 119.5793], zoom: 11, label: '澎湖縣' },
+      kinmen: { center: [24.4408, 118.3183], zoom: 11, label: '金門縣' },
+      lienchiang: { center: [26.1605, 119.9517], zoom: 11, label: '連江縣' }
+    };
+
+    function toggleQuickMenu(forceState) {
+      const panel = document.getElementById('quick-menu-panel');
+      const button = document.getElementById('quick-menu-toggle');
+      if (!panel || !button) return;
+      const shouldOpen = typeof forceState === 'boolean' ? forceState : panel.classList.contains('hidden');
+      panel.classList.toggle('hidden', !shouldOpen);
+      button.setAttribute('aria-expanded', String(shouldOpen));
+      button.setAttribute('aria-label', shouldOpen ? '關閉功能選單' : '開啟功能選單');
+    }
 
     function flyToRegion(key) {
       const target = regions[key];
