@@ -1,14 +1,9 @@
 name: Update Nationwide TDX VD Live Data
 
 on:
+  # 手動診斷用；正常五分鐘更新由 tdx-traffic.yml 單一工作流程統一執行，
+  # 避免 VD 與一般道路工作互相排隊、取消待執行工作。
   workflow_dispatch:
-  push:
-    paths:
-      - "scripts/fetch_tdx_traffic.py"
-      - ".github/workflows/tdx-vd.yml"
-  schedule:
-    # VD 動態資料每 5 分鐘更新；共用 TDX concurrency 與 8 秒請求節流，避免 API 429。
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
