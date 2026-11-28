@@ -1118,11 +1118,11 @@
     // =========================================================================
     function toggleLayerPanel(forceOpen) {
       const panel = document.getElementById('layer-panel');
+      if (!panel) return;
       if (typeof forceOpen === 'boolean') {
         panel.classList.toggle('hidden', !forceOpen);
         return;
       }
-      const panel = document.getElementById('layer-panel');
       panel.classList.toggle('hidden');
     }
 
