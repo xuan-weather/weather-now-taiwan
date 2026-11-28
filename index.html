@@ -164,6 +164,10 @@
     }
   
     #pbs-traffic-page { overscroll-behavior: contain; }
+    body.pbs-page-open #layer-controls-wrap,
+    body.pbs-page-open #traffic-legend-wrap,
+    body.pbs-page-open #map-controls-wrap,
+    body.pbs-page-open .leaflet-control-attribution { display: none !important; }
     #pbs-traffic-list .pbs-card { background: rgba(30,41,59,.88); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 12px; }
     #pbs-traffic-list .pbs-card:active { background: rgba(51,65,85,.95); }
 </style>
@@ -284,7 +288,7 @@
   <!-- =========================================================
        右上角：懸浮圖層控制面板 (可收合 / 展開)
   ========================================================= -->
-  <div class="fixed top-3 right-3 sm:top-4 sm:right-4 z-[1000] flex flex-col items-end gap-2">
+  <div id="layer-controls-wrap" class="fixed top-3 right-3 sm:top-4 sm:right-4 z-[1000] flex flex-col items-end gap-2">
     <!-- 展開/收合觸發按鈕 -->
     <button
       id="layer-toggle-btn"
@@ -439,7 +443,7 @@
   <!-- =========================================================
        左下角：懸浮路況圖例 & 即時更新狀態列
   ========================================================= -->
-  <div class="fixed bottom-4 left-3 sm:bottom-5 sm:left-4 z-[1000] pointer-events-none max-w-[calc(100vw-80px)]">
+  <div id="traffic-legend-wrap" class="fixed bottom-4 left-3 sm:bottom-5 sm:left-4 z-[1000] pointer-events-none max-w-[calc(100vw-80px)]">
     <div id="legend-panel" class="glass-panel rounded-2xl px-3 py-2.5 pointer-events-auto flex flex-col gap-2">
       <!-- 官方壅塞級別圖例 -->
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium">
@@ -480,7 +484,7 @@
   <!-- =========================================================
        右下角：懸浮地圖縮放與定位控制按鈕
   ========================================================= -->
-  <div class="fixed bottom-6 right-3 sm:bottom-7 sm:right-4 z-[1000] flex flex-col gap-2">
+  <div id="map-controls-wrap" class="fixed bottom-6 right-3 sm:bottom-7 sm:right-4 z-[1000] flex flex-col gap-2">
     <!-- 定位目前位置 -->
     <button
       onclick="locateUser()"
@@ -1434,6 +1438,7 @@
     let pbsTrafficLoading = false;
     function openPbsTraffic() {
       toggleQuickMenu(false);
+      document.body.classList.add('pbs-page-open');
       document.getElementById('pbs-traffic-page').classList.remove('hidden');
       document.getElementById('pbs-traffic-search').value = '';
       document.getElementById('pbs-traffic-region').value = 'all';
@@ -1441,6 +1446,7 @@
     }
     function closePbsTraffic() {
       document.getElementById('pbs-traffic-page').classList.add('hidden');
+      document.body.classList.remove('pbs-page-open');
     }
     function pbsEscape(value) {
       return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
