@@ -837,6 +837,7 @@ def summarize_vd_live(live):
     vehicle_speeds = []
     occupancies = []
     lane_count = 0
+    volume_records = 0
     vehicle_volumes = {"M": 0, "S": 0, "L": 0, "T": 0}
     for link in collection_items(live.get("LinkFlows"), "LinkFlow"):
         link_id = str(link.get("LinkID") or "").strip()
@@ -844,8 +845,6 @@ def summarize_vd_live(live):
             link_ids.append(link_id)
         for lane in collection_items(link.get("Lanes"), "Lane"):
             lane_count += 1
-            # TDX 標準車道平均速率欄位為 Lane.Speed（km/h）。
-            # 同時兼容大小寫及部分來源使用的 LaneSpeed 命名。
             raw_lane_speed = lane.get("Speed")
             if raw_lane_speed is None:
                 raw_lane_speed = lane.get("LaneSpeed", lane.get("speed"))
@@ -860,8 +859,7 @@ def summarize_vd_live(live):
                 volume = number_or_none(vehicle.get("Volume", vehicle.get("volume")), 0, 1000000)
                 if vehicle_type in vehicle_volumes and volume is not None:
                     vehicle_volumes[vehicle_type] += int(volume)
-                # 部分 TDX VD 回應在 Vehicle 層提供車種平均速率；
-                # 僅在 Lane.Speed 全部缺值／異常時作為官方資料備援，不自行估算。
+                    volume_records += 1
                 raw_vehicle_speed = vehicle.get("Speed")
                 if raw_vehicle_speed is None:
                     raw_vehicle_speed = vehicle.get("VehicleSpeed", vehicle.get("speed"))
@@ -869,6 +867,29 @@ def summarize_vd_live(live):
                 if vehicle_speed is not None:
                     weight = volume if volume is not None and volume > 0 else 1
                     vehicle_speeds.append((vehicle_speed, weight))
+
+    # 兼容部分業管單位直接在 VDLive 層提供標準欄位的回應；
+    # 僅讀取官方原始值，不以車流量或佔有率推算車速。
+    if not lane_speeds:
+        top_speed = number_or_none(field_value(live, "Speed", "LaneSpeed", "AverageSpeed"), 0, 200)
+        if top_speed is not None:
+            lane_speeds.append(top_speed)
+    if not occupancies:
+        top_occupancy = number_or_none(field_value(live, "Occupancy", "LaneOccupancy"), 0, 100)
+        if top_occupancy is not None:
+            occupancies.append(top_occupancy)
+    if volume_records == 0:
+        for code, keys in {
+            "M": ("Volume_M", "VolumeM", "MotorcycleVolume"),
+            "S": ("Volume_S", "VolumeS", "SmallVehicleVolume"),
+            "L": ("Volume_L", "VolumeL", "LargeVehicleVolume"),
+            "T": ("Volume_T", "VolumeT", "TrailerVolume")
+        }.items():
+            value = number_or_none(field_value(live, *keys), 0, 1000000)
+            if value is not None:
+                vehicle_volumes[code] = int(value)
+                volume_records += 1
+
     raw_status = live.get("Status")
     try:
         status = int(raw_status) if raw_status is not None and str(raw_status).strip() != "" else None
@@ -876,7 +897,7 @@ def summarize_vd_live(live):
         status = None
     if lane_speeds:
         speed = round(sum(lane_speeds) / len(lane_speeds), 1)
-        speed_source = "Lane.Speed"
+        speed_source = "Lane.Speed" if lane_count else "VDLive.Speed"
     elif vehicle_speeds:
         total_weight = sum(weight for _value, weight in vehicle_speeds)
         speed = round(sum(value * weight for value, weight in vehicle_speeds) / total_weight, 1)
@@ -884,6 +905,8 @@ def summarize_vd_live(live):
     else:
         speed = None
         speed_source = "unavailable"
+    data_time = (live.get("DataCollectTime") or live.get("UpdateTime")
+                 or live.get("_FeedUpdateTime") or "")
     return {
         "linkIds": link_ids,
         "laneCount": lane_count,
@@ -892,10 +915,13 @@ def summarize_vd_live(live):
         "validLaneSpeedCount": len(lane_speeds),
         "validVehicleSpeedCount": len(vehicle_speeds),
         "occupancy": round(sum(occupancies) / len(occupancies), 1) if occupancies else None,
-        "volumePerMinute": sum(vehicle_volumes.values()),
+        "volumePerMinute": sum(vehicle_volumes.values()) if volume_records else None,
         "vehicleVolumes": vehicle_volumes,
         "status": status,
-        "dataCollectTime": live.get("DataCollectTime") or live.get("UpdateTime") or ""
+        "dataCollectTime": data_time,
+        "speedAvailable": speed is not None,
+        "flowAvailable": volume_records > 0,
+        "occupancyAvailable": bool(occupancies)
     }
 
 
@@ -998,18 +1024,30 @@ def fetch_vd_layer(bearer, static_cache):
 
     live_devices = 0
     live_speed_devices = 0
+    live_flow_devices = 0
+    live_occupancy_devices = 0
+    stale_devices = 0
+    status_counts = {}
     for device in devices.values():
-        if device.get("status") != 0 or not device.get("dataCollectTime"):
+        status_key = str(device.get("status")) if device.get("status") is not None else "unknown"
+        status_counts[status_key] = status_counts.get(status_key, 0) + 1
+        if not device.get("dataCollectTime"):
             continue
         try:
             collected = datetime.fromisoformat(str(device["dataCollectTime"]).replace("Z", "+00:00"))
             if collected.tzinfo is None:
                 collected = collected.replace(tzinfo=TW)
             age = (now - collected.astimezone(TW)).total_seconds()
-            if -120 <= age <= 300:
+            if device.get("status") == 0 and -120 <= age <= 300:
                 live_devices += 1
                 if number_or_none(device.get("speed"), 0, 200) is not None:
                     live_speed_devices += 1
+                if device.get("volumePerMinute") is not None:
+                    live_flow_devices += 1
+                if number_or_none(device.get("occupancy"), 0, 100) is not None:
+                    live_occupancy_devices += 1
+            elif age > 300:
+                stale_devices += 1
         except (TypeError, ValueError):
             continue
 
@@ -1020,7 +1058,12 @@ def fetch_vd_layer(bearer, static_cache):
         "totalDevices": len(devices),
         "liveDevices": live_devices,
         "liveSpeedDevices": live_speed_devices,
-        "liveDataStatus": "即時筆數依設備狀態與觀測時間判斷；有效車速另行統計",
+        "liveFlowDevices": live_flow_devices,
+        "liveOccupancyDevices": live_occupancy_devices,
+        "staleDevices": stale_devices,
+        "statusCounts": status_counts,
+        "freshnessWindowSeconds": 300,
+        "liveDataStatus": "即時筆數依設備正常狀態與最近 5 分鐘資料時間判斷；車速、流量、佔有率分開統計，不以其他欄位推算車速",
         "sources": list(stats_by_key.values()),
         "devices": list(devices.values())
     }
@@ -1030,7 +1073,14 @@ def fetch_vd_layer(bearer, static_cache):
     print(f"[VD] saved {len(devices)} official detector locations; fresh live={live_devices}; with valid speed={live_speed_devices}.")
 
 def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
     bearer=token()
+    if mode == "--vd-only":
+        section_cache = load_supplemental_cache()
+        fetch_vd_layer(bearer, section_cache)
+        save_supplemental_cache(section_cache)
+        print("[VD] Independent VD refresh completed.")
+        return
     all_segments=[]
     stats=[]
     shape_cache = load_shape_cache()
@@ -1088,8 +1138,9 @@ def main():
     save_shape_cache(shape_cache)
     save_congestion_cache(level_cache)
     save_supplemental_cache(section_cache)
-    fetch_vd_layer(bearer, section_cache)
-    save_supplemental_cache(section_cache)
+    if mode != "--skip-vd":
+        fetch_vd_layer(bearer, section_cache)
+        save_supplemental_cache(section_cache)
     fetch_supplemental_layers(bearer)
     generated_at = datetime.now(TW)
     # 以各路段來源提供的觀測時間計算最新官方資料時間；
