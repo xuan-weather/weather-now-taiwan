@@ -63,6 +63,7 @@ def parse_kml_mileposts(raw_zip):
         raise ValueError("Official freeway milepost archive contains no KML")
     root = ET.fromstring(archive.read(kml_name))
     points = []
+    debug_samples = []
 
     def local_name(element):
         return element.tag.rsplit("}", 1)[-1].lower()
@@ -103,6 +104,8 @@ def parse_kml_mileposts(raw_zip):
                 if local_name(element) == "coordinates" and element.text:
                     coord_text = element.text.strip()
                     break
+            if len(debug_samples) < 12:
+                debug_samples.append({"context": context[:180], "name": name[:120], "description": desc[:160], "parsed": parsed, "coordinates": coord_text[:100]})
             if parsed and coord_text:
                 values = coord_text.split()[0].split(",")
                 if len(values) >= 2:
@@ -118,7 +121,8 @@ def parse_kml_mileposts(raw_zip):
 
     walk(root)
     if not points:
-        raise ValueError("No direction-specific highway milepost coordinates parsed from official KML; check KML folder metadata")
+        print("KML diagnostic sample: " + json.dumps(debug_samples, ensure_ascii=False))
+        raise ValueError("No highway milepost coordinates parsed from official KML; inspect KML diagnostic sample")
     unique = {}
     for point in points:
         key = (point["road"], point["direction"], round(point["km"], 3))
