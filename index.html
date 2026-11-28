@@ -162,7 +162,11 @@
       );
       background-size: 100% 4px;
     }
-  </style>
+  
+    #pbs-traffic-page { overscroll-behavior: contain; }
+    #pbs-traffic-list .pbs-card { background: rgba(30,41,59,.88); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 12px; }
+    #pbs-traffic-list .pbs-card:active { background: rgba(51,65,85,.95); }
+</style>
 </head>
 <body class="select-none">
 
@@ -218,14 +222,39 @@
         </span>
         <span class="shrink-0 rounded-full bg-sky-500/25 px-2 py-1 text-[10px] font-semibold text-sky-200">目前頁面</span>
       </div>
-      <a href="http://rtr.pbs.gov.tw/realtime/RoadAll.php" target="_blank" rel="noopener noreferrer"
-        onclick="toggleQuickMenu(false)"
+      <button type="button" onclick="openPbsTraffic()"
         class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-xs text-slate-100 hover:bg-white/10 transition">
         <span class="text-amber-300">📻</span>
         <span class="font-medium">警廣即時路況</span>
-        <span class="ml-auto text-[10px] text-slate-400">↗</span>
-      </a>
+        <span class="ml-auto text-[10px] text-slate-400">站內查看</span>
+      </button>
     </div>
+
+    <!-- 警廣即時路況站內頁面 -->
+    <section id="pbs-traffic-page" class="hidden fixed inset-0 z-[1200] bg-slate-950/95 text-slate-100 pointer-events-auto">
+      <div class="h-full flex flex-col max-w-5xl mx-auto">
+        <header class="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-slate-900/95">
+          <button type="button" onclick="closePbsTraffic()" class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/15 flex items-center justify-center" aria-label="返回即時路況地圖">←</button>
+          <div class="min-w-0 flex-1">
+            <div class="font-bold text-base">📻 警廣即時路況</div>
+            <div id="pbs-traffic-meta" class="text-[11px] text-slate-400">正在載入官方路況資料…</div>
+          </div>
+          <button type="button" onclick="loadPbsTraffic(true)" class="px-3 py-2 rounded-xl bg-sky-500 text-white text-xs font-semibold">重新整理</button>
+        </header>
+        <div class="p-3 border-b border-white/10 grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-2">
+          <input id="pbs-traffic-search" type="search" placeholder="搜尋道路、地點或路況內容…" oninput="renderPbsTrafficList()" class="w-full rounded-xl bg-slate-800 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-400 outline-none focus:border-sky-400">
+          <select id="pbs-traffic-region" onchange="renderPbsTrafficList()" class="rounded-xl bg-slate-800 border border-white/10 px-3 py-2.5 text-sm text-white">
+            <option value="all">全台灣</option><option value="N">北部</option><option value="M">中部</option><option value="S">南部</option><option value="E">東部</option>
+          </select>
+        </div>
+        <div id="pbs-traffic-list" class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2">
+          <div class="rounded-xl bg-slate-800 p-4 text-sm text-slate-300">正在載入警廣官方路況資料…</div>
+        </div>
+        <footer class="px-4 py-2 border-t border-white/10 text-[10px] text-slate-400">
+          資料來源：警察廣播電臺／政府資料開放平臺（政府資料開放授權條款第1版）。官方資料最多提供最新1,000筆，與警廣查詢網頁可能有最多1分鐘時間差。
+        </footer>
+      </div>
+    </section>
 
     <!-- 搜尋建議下拉清單 -->
     <div id="search-results" class="hidden glass-panel rounded-2xl p-1.5 max-h-56 overflow-y-auto pointer-events-auto text-xs"></div>
@@ -1397,6 +1426,95 @@
       toastTimeout = setTimeout(() => {
         toast.classList.add('opacity-0');
       }, 2800);
+    }
+
+    // 警廣即時路況：站內列表，資料由 GitHub Actions 定期同步官方開放資料
+    let pbsTrafficRecords = [];
+    let pbsTrafficFetchedAt = null;
+    let pbsTrafficLoading = false;
+    function openPbsTraffic() {
+      toggleQuickMenu(false);
+      document.getElementById('pbs-traffic-page').classList.remove('hidden');
+      document.getElementById('pbs-traffic-search').value = '';
+      document.getElementById('pbs-traffic-region').value = 'all';
+      loadPbsTraffic(false);
+    }
+    function closePbsTraffic() {
+      document.getElementById('pbs-traffic-page').classList.add('hidden');
+    }
+    function pbsEscape(value) {
+      return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function pbsExtractRecords(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (!payload || typeof payload !== 'object') return [];
+      for (const key of ['records','data','Data','result','Result','roadData','RoadData','items','Items']) {
+        if (Array.isArray(payload[key])) return payload[key];
+        if (payload[key] && typeof payload[key] === 'object') {
+          const nested = pbsExtractRecords(payload[key]);
+          if (nested.length) return nested;
+        }
+      }
+      return [];
+    }
+    function pbsField(row, names) {
+      for (const name of names) if (row && row[name] != null && row[name] !== '') return row[name];
+      return '';
+    }
+    async function loadPbsTraffic(force) {
+      if (pbsTrafficLoading) return;
+      pbsTrafficLoading = true;
+      const list = document.getElementById('pbs-traffic-list');
+      const meta = document.getElementById('pbs-traffic-meta');
+      if (!pbsTrafficRecords.length) list.innerHTML = '<div class="rounded-xl bg-slate-800 p-4 text-sm text-slate-300">正在載入警廣官方路況資料…</div>';
+      try {
+        const response = await fetch('./data/pbs-traffic.json?ts=' + Date.now(), {cache:'no-store'});
+        if (!response.ok) throw new Error('資料檔讀取失敗（HTTP ' + response.status + '）');
+        const payload = await response.json();
+        pbsTrafficRecords = pbsExtractRecords(payload);
+        pbsTrafficFetchedAt = payload.fetchedAt || null;
+        meta.textContent = '官方資料 ' + pbsTrafficRecords.length.toLocaleString() + ' 筆' + (pbsTrafficFetchedAt ? '｜同步時間 ' + new Date(pbsTrafficFetchedAt).toLocaleString('zh-TW') : '｜等待首次同步');
+        renderPbsTrafficList();
+        if (!pbsTrafficRecords.length) {
+          list.innerHTML = '<div class="rounded-xl bg-amber-500/10 border border-amber-400/20 p-4 text-sm text-amber-200">目前尚未取得資料。請確認 GitHub Actions「Update PBS Live Traffic」首次執行成功。</div>';
+        }
+      } catch (error) {
+        meta.textContent = '官方資料暫時無法載入';
+        list.innerHTML = '<div class="rounded-xl bg-rose-500/10 border border-rose-400/20 p-4 text-sm text-rose-200">警廣路況資料載入失敗：' + pbsEscape(error.message) + '<div class="mt-2 text-xs text-slate-300">請稍後重新整理；不會以舊資料冒充即時資料。</div></div>';
+      } finally {
+        pbsTrafficLoading = false;
+      }
+    }
+    function renderPbsTrafficList() {
+      const list = document.getElementById('pbs-traffic-list');
+      if (!list) return;
+      const query = (document.getElementById('pbs-traffic-search')?.value || '').trim().toLowerCase();
+      const region = document.getElementById('pbs-traffic-region')?.value || 'all';
+      const regionNames = {A:'全區',N:'北部',M:'中部',S:'南部',E:'東部'};
+      const filtered = pbsTrafficRecords.filter(row => {
+        const r = String(pbsField(row,['region','Region'])).toUpperCase();
+        if (region !== 'all' && r !== region) return false;
+        const text = ['road','Road','areaNm','AreaNm','comment','Comment','direction','Direction','roadtype','RoadType','srcdetail','SrcDetail']
+          .map(k => pbsField(row,[k])).join(' ').toLowerCase();
+        return !query || text.includes(query);
+      }).sort((a,b) => String(pbsField(b,['modDttm','ModDttm','happendate','HappenDate']) + pbsField(b,['happentime','HappenTime']))
+        .localeCompare(String(pbsField(a,['modDttm','ModDttm','happendate','HappenDate']) + pbsField(a,['happentime','HappenTime']))));
+      if (!filtered.length) {
+        list.innerHTML = '<div class="rounded-xl bg-slate-800 p-4 text-sm text-slate-300 text-center">目前沒有符合條件的路況資料</div>';
+        return;
+      }
+      list.innerHTML = filtered.map(row => {
+        const road = pbsField(row,['road','Road']) || '道路資訊未提供';
+        const area = pbsField(row,['areaNm','AreaNm']);
+        const direction = pbsField(row,['direction','Direction']);
+        const comment = pbsField(row,['comment','Comment']) || '未提供詳細說明';
+        const type = pbsField(row,['roadtype','RoadType']);
+        const date = pbsField(row,['happendate','HappenDate']);
+        const time = pbsField(row,['happentime','HappenTime']);
+        const updated = pbsField(row,['modDttm','ModDttm']);
+        const regionCode = String(pbsField(row,['region','Region'])).toUpperCase();
+        return '<article class="pbs-card"><div class="flex items-start justify-between gap-2"><div class="min-w-0"><div class="font-semibold text-sm text-white">' + pbsEscape(road) + '</div><div class="text-[11px] text-slate-400 mt-1">' + pbsEscape([area,direction].filter(Boolean).join('｜')) + '</div></div><span class="shrink-0 rounded-full bg-amber-400/15 text-amber-200 px-2 py-1 text-[10px]">' + pbsEscape(type || '路況') + '</span></div><p class="text-sm text-slate-200 leading-relaxed mt-2 whitespace-pre-wrap">' + pbsEscape(comment) + '</p><div class="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px] text-slate-400"><span>' + pbsEscape(regionNames[regionCode] || '區域未標示') + '</span><span>發生：' + pbsEscape([date,time].filter(Boolean).join(' ')) + '</span>' + (updated ? '<span>更新：' + pbsEscape(updated) + '</span>' : '') + '</div></article>';
+      }).join('');
     }
 
     // =========================================================================
