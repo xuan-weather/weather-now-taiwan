@@ -297,7 +297,8 @@ def section_id(item):
 def geometry_points(item):
     geom = item.get("Geometry") or item.get("geometry") or item.get("WKT")
     if isinstance(geom, dict):
-        kind = str(geom.get("type", "")).lower()        raw = geom.get("coordinates", [])
+        kind = str(geom.get("type", "")).lower()
+        raw = geom.get("coordinates", [])
         if kind == "linestring":
             lines = [raw]
         elif kind == "multilinestring":
@@ -596,7 +597,8 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
         if speed is None:
             # 保留有官方路段線型、但當下沒有有效車速的資料；前端以灰色顯示，不推算或補造車速。
             if diag is not None: diag["skippedNoSpeed"]+=1
-            status, level_number, level_name = "資料不足", None, None        else:
+            status, level_number, level_name = "資料不足", None, None
+        else:
             status, level_number, level_name = official_congestion_status(item, definition, speed)
         for sid in section_ids:
             coords=shape_by_id.get(sid)
@@ -895,7 +897,8 @@ def summarize_vd_live(live):
     # TDX v2 部分資料以 VDID + LinkID + LaneID 的扁平車道欄位回傳，
     # 另一些端點則使用 LinkFlows/Lanes 巢狀結構；兩種格式都讀取官方 Speed。
     if not lane_speeds and not vehicle_speeds:
-        top_raw_speed = field_value(live, *lane_speed_keys)        if top_raw_speed is not None:
+        top_raw_speed = field_value(live, *lane_speed_keys)
+        if top_raw_speed is not None:
             raw_speed_values.append(top_raw_speed)
         top_speed = number_or_none(top_raw_speed, 0, 200)
         if top_speed is not None:
@@ -1190,11 +1193,28 @@ def main():
     level_cache = load_congestion_cache()
     section_cache = load_supplemental_cache()
     # 即時車速每輪重新抓取；道路線型快取 7 天，官方分級定義快取 24 小時。
-    # 優先取得全國性省道／國道即時車速，再處理縣市道路與靜態線型對照。\n    for live_city, shape_city in CITY_PAIRS:
+
+    # Prioritize nationwide live speed feeds before city mapping and cached geometry.
+    # 國道、省道使用全國性端點，不帶縣市代碼。
+    for category, label, region in (("Highway","全台省道","highway"),("Freeway","全台國道","freeway")):
+        try:
+            live = rows(f"Road/Traffic/Live/{category}", bearer)
+            sections = cached_static_rows(f"Road/Traffic/Section/{category}", bearer, section_cache)
+            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/{category}", bearer, shape_cache)
+            level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/{category}", bearer, level_cache)
+            segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況", section_rows=sections, level_index=build_definition_index(level_groups))
+            all_segments.extend(segments)
+            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"unmappedRecords":max(0,len(live)-len(segments)),"mappingRate":round(len(segments)/len(live)*100,1) if live else 0,"ok":True})
+            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)} unmapped={max(0,len(live)-len(segments))}")
+        except Exception as exc:
+            stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
+            print(f"[WARN] {label}: {exc}",file=sys.stderr)
+    for live_city, shape_city in CITY_PAIRS:
         city_code, label, region = live_city
         try:
             live = rows(f"Road/Traffic/Live/City/{city_code}", bearer)
-            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer, shape_cache)            shape_ids={section_id(item) for item in shapes if section_id(item)}
+            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer, shape_cache)
+            shape_ids={section_id(item) for item in shapes if section_id(item)}
             direct_ids={section_id(item) for item in live if section_id(item)}
             # TDX 標準允許即時資料以 SectionID 或 LinkIDs 表示路段。
             # 只有在即時資料無法直接對上線型時，才額外取 SectionLink 對照表。
@@ -1221,20 +1241,6 @@ def main():
             stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
 
-    # 國道、省道使用全國性端點，不帶縣市代碼。
-    for category, label, region in (("Highway","全台省道","highway"),("Freeway","全台國道","freeway")):
-        try:
-            live = rows(f"Road/Traffic/Live/{category}", bearer)
-            sections = cached_static_rows(f"Road/Traffic/Section/{category}", bearer, section_cache)
-            shapes = cached_shape_rows(f"Road/Traffic/SectionShape/{category}", bearer, shape_cache)
-            level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/{category}", bearer, level_cache)
-            segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況", section_rows=sections, level_index=build_definition_index(level_groups))
-            all_segments.extend(segments)
-            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"unmappedRecords":max(0,len(live)-len(segments)),"mappingRate":round(len(segments)/len(live)*100,1) if live else 0,"ok":True})
-            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)} unmapped={max(0,len(live)-len(segments))}")
-        except Exception as exc:
-            stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
-            print(f"[WARN] {label}: {exc}",file=sys.stderr)
     if not all_segments:
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
     save_shape_cache(shape_cache)
