@@ -1050,7 +1050,7 @@
           const sourceText = String(row.srcdetail || '');
           if (!/國道/.test(roadText) || !/高速公路局|國道.*交控中心/.test(sourceText)) return;
           const text = roadText + ' ' + String(row.comment || '') + ' ' + String(row.roadtype || '');
-          if (/已排除|已恢復正常|排除\*/.test(text)) return;
+          if (/排除|已恢復正常/.test(text)) return;
           const rawType = String(row.roadtype || '');
           let type = /事故|車禍|追撞|擦撞|翻覆|碰撞/.test(rawType + ' ' + text) ? 'accident'
             : (/道路施工|施工/.test(rawType + ' ' + text) ? 'roadwork'
