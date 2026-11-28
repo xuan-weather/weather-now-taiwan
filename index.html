@@ -194,7 +194,7 @@ all:{center:[23.75,120.95],zoom:8,name:'全台路網'}
 };
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const parseDate=v=>{if(!v)return null;let s=String(v).trim();if(/^\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d/.test(s))s=s.replace(/\\//g,'-').replace(' ','T');const d=new Date(s);return Number.isNaN(d.getTime())?null:d;};
-function segmentFresh(seg){const speed=Number(seg.speed);const d=parseDate(seg.updateTime);const age=d?Date.now()-d.getTime():Infinity;return Number.isFinite(speed)&&speed>=0&&speed<=200&&!!d&&age>=-5*60*1000&&age<=30*60*1000;}
+function segmentFresh(seg){if(seg.speed===null||seg.speed===undefined||seg.speed===''||seg.speedAvailable===false)return false;const speed=Number(seg.speed);const d=parseDate(seg.updateTime);const age=d?Date.now()-d.getTime():Infinity;return Number.isFinite(speed)&&speed>=0&&speed<=200&&!!d&&age>=-5*60*1000&&age<=30*60*1000;}
 function segmentInViewport(seg,bounds){const b=seg._bounds;if(!b)return true;return b[0]<=bounds.getNorth()&&b[2]>=bounds.getSouth()&&b[1]<=bounds.getEast()&&b[3]>=bounds.getWest();}
 function formatTime(v){const d=parseDate(v);return d?d.toLocaleString('zh-TW',{hour12:false}):'時間未提供';}
 function routeMeta(seg){
@@ -234,7 +234,7 @@ const viewport=map.getBounds();
 let smooth=0,busy=0,congested=0,stale=0,freshCount=0,unclassified=0;
 roadSegments.forEach(seg=>{
 if(!Array.isArray(seg.coords)||seg.coords.length<2)return;
-const fresh=segmentFresh(seg),speed=Number(seg.speed),style=getTrafficStyle(seg,fresh);
+const fresh=segmentFresh(seg),speed=(seg.speed===null||seg.speed===undefined||seg.speed==='')?NaN:Number(seg.speed),style=getTrafficStyle(seg,fresh);
 if(!fresh)stale++;else{
 freshCount++;
 if(seg.congestionStatus==='順暢')smooth++;
@@ -251,7 +251,7 @@ if(zoom<9&&seg.region!=='freeway')return;
 if(zoom<13&&seg.region!=='freeway'&&seg.region!=='highway')return;
 // Canvas 單層繪製，避免 SVG 與發光濾鏡造成額外重繪。
 const line=L.polyline(seg.coords,{renderer:map.getRenderer(map),color:style.color,weight:4,opacity:fresh?.92:.55,lineCap:'round',lineJoin:'round',interactive:true}).addTo(layers.traffic);
-line.bindPopup(`<div class="p-3.5"><div class="flex items-center justify-between gap-2 mb-2"><b class="text-xs text-cyan-300">${esc(seg.highwayName)}</b><span class="text-xs">${style.label}</span></div><h4 class="font-bold text-sm mb-2">${esc(seg.name)}</h4><div class="text-sm">車速：<b style="color:${style.color}">${fresh&&Number.isFinite(speed)?Math.round(speed)+' km/h':'待確認'}</b></div><div class="text-xs text-slate-400 mt-1">觀測時間：${esc(formatTime(seg.updateTime))}</div><div class="text-xs text-cyan-300 mt-1">官方分級：${esc(seg.congestionStatus||'未提供')}</div><div class="text-xs text-slate-500 mt-1">來源：${esc(seg.sourceLabel||'交通部 TDX')}</div></div>`);
+line.bindPopup(`<div class="p-3.5"><div class="flex items-center justify-between gap-2 mb-2"><b class="text-xs text-cyan-300">${esc(seg.highwayName)}</b><span class="text-xs" style="color:${style.color}">${fresh?style.label:'無有效即時車速'}</span></div><h4 class="font-bold text-sm mb-2">${esc(seg.name)}</h4><div class="text-sm">即時車速：<b style="color:${style.color}">${fresh&&Number.isFinite(speed)?Math.round(speed)+' km/h':'未提供/資料逾時'}</b></div><div class="text-xs text-slate-400 mt-1">設備觀測時間：${esc(formatTime(seg.updateTime))}</div><div class="text-xs text-cyan-300 mt-1">官方路況分級：${esc(seg.congestionStatus||'未提供')}</div><div class="text-xs text-slate-500 mt-1">資料來源：${esc(seg.sourceLabel||'交通部 TDX')}</div><div class="text-[10px] text-slate-500 mt-1">灰色路段表示有官方道路線型，但目前沒有可用的即時車速；不代表道路封閉。</div></div>`);
 seg.leafletLayer=line;
 });
 document.getElementById('stat-smooth').textContent=smooth;
@@ -402,11 +402,11 @@ fetch('./data/tdx-vd.json?ts='+Date.now(),{cache:'no-store'}).catch(()=>null)
 if(!trafficRes.ok)throw new Error(`路況資料 HTTP ${trafficRes.status}`);
 const payload=await trafficRes.json();
 if(!Array.isArray(payload.segments)||payload.segments.length===0)throw new Error('官方路況資料尚未產生或目前沒有可用路段');
-roadSegments=payload.segments.filter(s=>Array.isArray(s.coords)&&s.coords.length>=2&&Number.isFinite(Number(s.speed))).map(s=>{
+roadSegments=payload.segments.filter(s=>Array.isArray(s.coords)&&s.coords.length>=2).map(s=>{
 const meta=routeMeta(s),coords=s.coords;
 let minLat=90,minLng=180,maxLat=-90,maxLng=-180;
 coords.forEach(p=>{if(Array.isArray(p)&&p.length>=2){const lat=Number(p[0]),lng=Number(p[1]);if(Number.isFinite(lat)&&Number.isFinite(lng)){minLat=Math.min(minLat,lat);minLng=Math.min(minLng,lng);maxLat=Math.max(maxLat,lat);maxLng=Math.max(maxLng,lng);}}});
-return {...s,...meta,_bounds:[minLat,minLng,maxLat,maxLng],speed:Number(s.speed),direction:s.direction||'',sourceLabel:s.sourceLabel||payload.source||'交通部 TDX'};
+return {...s,...meta,_bounds:[minLat,minLng,maxLat,maxLng],speed:(s.speed===null||s.speed===undefined||s.speed==='')?null:Number(s.speed),direction:s.direction||'',sourceLabel:s.sourceLabel||payload.source||'交通部 TDX'};
 });
 let layerData={};
 if(layersRes&&layersRes.ok){try{layerData=await layersRes.json();}catch(_){layerData={};}}
