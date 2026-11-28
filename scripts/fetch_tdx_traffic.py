@@ -970,7 +970,7 @@ def fetch_vd_layer(bearer, static_cache):
     live_sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
     devices = {}
     stats_by_key = {}
-    now = datetime.now(TW)
+    fetch_started_at = datetime.now(TW)
 
     static_started_at = time.monotonic()
     for code, label, source_type in static_sources:
@@ -1073,6 +1073,9 @@ def fetch_vd_layer(bearer, static_cache):
         stat["liveFetchSeconds"] = round(time.monotonic() - source_started_at, 2)
 
     live_fetch_seconds = round(time.monotonic() - live_started_at, 2)
+    # Timestamp and freshness must be evaluated when the complete nationwide
+    # snapshot is ready to publish, not before the multi-minute API fetch.
+    now = datetime.now(TW)
     live_devices = 0
     live_speed_devices = 0
     live_flow_devices = 0
@@ -1106,6 +1109,7 @@ def fetch_vd_layer(bearer, static_cache):
     payload = {
         "source": "交通部 TDX 路況資訊 v2 VD 官方靜態設備位置及 1 分鐘即時動態資料",
         "generatedAt": now.isoformat(timespec="seconds"),
+        "fetchStartedAt": fetch_started_at.isoformat(timespec="seconds"),
         "fetchDurationSeconds": {
             "static": static_fetch_seconds,
             "live": live_fetch_seconds,
