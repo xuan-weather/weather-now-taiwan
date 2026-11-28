@@ -972,7 +972,9 @@ def fetch_vd_layer(bearer, static_cache):
     stats_by_key = {}
     now = datetime.now(TW)
 
+    static_started_at = time.monotonic()
     for code, label, source_type in static_sources:
+        source_started_at = time.monotonic()
         source_key = (source_type, code)
         key_prefix = f"{source_type}:{code}:"
         stat = stats_by_key.setdefault(source_key, {
@@ -1027,8 +1029,12 @@ def fetch_vd_layer(bearer, static_cache):
         except Exception as exc:
             stat["staticError"] = str(exc)[:220]
             print(f"[VD STATIC WARN] {label}: {exc}", file=sys.stderr)
+        stat["staticFetchSeconds"] = round(time.monotonic() - source_started_at, 2)
 
+    static_fetch_seconds = round(time.monotonic() - static_started_at, 2)
+    live_started_at = time.monotonic()
     for code, label, source_type in live_sources:
+        source_started_at = time.monotonic()
         source_key = (source_type, code)
         key_prefix = f"{source_type}:{code}:"
         stat = stats_by_key.setdefault(source_key, {
@@ -1038,6 +1044,12 @@ def fetch_vd_layer(bearer, static_cache):
             "staticOK": False, "liveOK": False
         })
         live_path = f"Road/Traffic/Live/VD/{'City/' if source_type == 'city' else ''}{code}"
+        # Do not spend a TDX request on a source whose static inventory is
+        # unavailable or contains no mappable VD devices.
+        if not any(key.startswith(key_prefix) for key in devices):
+            stat["liveSkippedNoStaticDevices"] = True
+            print(f"[VD LIVE SKIP] {label}: no mapped static VD devices")
+            continue
         try:
             live_rows = rows(live_path, bearer)
             stat["liveRecords"] = len(live_rows)
@@ -1058,7 +1070,9 @@ def fetch_vd_layer(bearer, static_cache):
         except Exception as exc:
             stat["liveError"] = str(exc)[:220]
             print(f"[VD LIVE WARN] {label}: {exc}", file=sys.stderr)
+        stat["liveFetchSeconds"] = round(time.monotonic() - source_started_at, 2)
 
+    live_fetch_seconds = round(time.monotonic() - live_started_at, 2)
     live_devices = 0
     live_speed_devices = 0
     live_flow_devices = 0
@@ -1092,6 +1106,11 @@ def fetch_vd_layer(bearer, static_cache):
     payload = {
         "source": "交通部 TDX 路況資訊 v2 VD 官方靜態設備位置及 1 分鐘即時動態資料",
         "generatedAt": now.isoformat(timespec="seconds"),
+        "fetchDurationSeconds": {
+            "static": static_fetch_seconds,
+            "live": live_fetch_seconds,
+            "total": round(static_fetch_seconds + live_fetch_seconds, 2)
+        },
         "updateIntervalSeconds": 60,
         "totalDevices": len(devices),
         "liveDevices": live_devices,
