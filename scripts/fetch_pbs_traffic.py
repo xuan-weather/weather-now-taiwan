@@ -31,10 +31,11 @@ def normalize_road_text(value):
     return value
 
 
-def parse_milepost_context(text):
+def parse_milepost_context(text, require_direction=False):
+    """Parse route/km even when the official KML omits direction metadata."""
     text = normalize_road_text(text)
-    road_match = re.search(r"(?:國道|國)\s*(\d{1,2})(?:號)?", text)
-    # Support decimal km (337.8km) and K+metres (337K+800).
+    road_match = re.search(r"(?:國道|國)\s*(\d{1,2})\s*(?:號)?", text)
+    # Support decimal km (337.8km), K+metres (337K+800), and compact KML names.
     km_match = re.search(r"(\d{1,3})\s*K\s*\+\s*(\d{1,3})", text, re.I)
     if km_match:
         km = int(km_match.group(1)) + int(km_match.group(2)) / 1000
@@ -46,15 +47,14 @@ def parse_milepost_context(text):
     if not road_match:
         return None
     direction = ""
-    if re.search(r"南下|南向|南行|南向線|SOUTHBOUND|\bS\b|\bS-", text, re.I):
+    if re.search(r"南下|南向|南行|南向線|南下線|往南|SOUTHBOUND|\bS\b|\bS-", text, re.I):
         direction = "S"
-    elif re.search(r"北上|北向|北行|北向線|NORTHBOUND|\bN\b|\bN-", text, re.I):
+    elif re.search(r"北上|北向|北行|北向線|北上線|往北|NORTHBOUND|\bN\b|\bN-", text, re.I):
         direction = "N"
-    if not direction:
+    if require_direction and not direction:
         return None
     road_code = road_match.group(1) + ("-high" if re.search(r"高架|汐止楊梅", text) else "")
     return road_code, direction, km
-
 
 def parse_kml_mileposts(raw_zip):
     archive = zipfile.ZipFile(io.BytesIO(raw_zip))
@@ -91,7 +91,13 @@ def parse_kml_mileposts(raw_zip):
                 lname = local_name(element)
                 if lname in ("value", "simpledata") and element.text:
                     metadata_parts.append(" ".join((element.attrib.get("name", ""), element.text.strip())))
-            parsed = parse_milepost_context(" ".join((context, name, desc, " ".join(metadata_parts))))
+            # Include placemark text fields in addition to standard KML name/description fields.
+            all_text = " ".join(
+                (element.text or "").strip()
+                for element in node.iter()
+                if element.text and (element.text or "").strip()
+            )
+            parsed = parse_milepost_context(" ".join((context, name, desc, " ".join(metadata_parts), all_text)))
             coord_text = ""
             for element in node.iter():
                 if local_name(element) == "coordinates" and element.text:
@@ -178,7 +184,15 @@ def geocode_highway_incidents(records):
         if not parsed:
             continue
         road, direction, km = parsed
-        candidates = index.get((road, direction), [])
+        # Prefer a direction-specific point; fall back to route-wide nearest
+        # when the official KML does not provide direction metadata.
+        candidates = index.get((road, direction), []) if direction else []
+        if not candidates:
+            candidates = [
+                point for (candidate_road, _candidate_direction), values in index.items()
+                if candidate_road == road
+                for point in values
+            ]
         if not candidates:
             continue
         nearest = min(candidates, key=lambda point: abs(point["km"] - km))
