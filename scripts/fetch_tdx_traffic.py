@@ -624,6 +624,7 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
 # Supplementary nationwide layers: road events, CCTV inventory, and parking availability.
 SUPPLEMENTAL_PATH = "data/tdx-layers.json"
 SUPPLEMENTAL_CACHE_PATH = "data/tdx-layers-cache.json"
+VD_STATIC_CACHE_PATH = "data/tdx-vd-static-cache.json"
 SUPPLEMENTAL_CACHE_TTL = 7 * 24 * 60 * 60
 SUPPLEMENTAL_CITIES = [
     ("Taipei","臺北市"),("NewTaipei","新北市"),("Keelung","基隆市"),
@@ -636,17 +637,17 @@ SUPPLEMENTAL_CITIES = [
     ("LienchiangCounty","連江縣")
 ]
 
-def load_supplemental_cache():
+def load_supplemental_cache(path=SUPPLEMENTAL_CACHE_PATH):
     try:
-        with open(SUPPLEMENTAL_CACHE_PATH,"r",encoding="utf-8") as f:
+        with open(path,"r",encoding="utf-8") as f:
             data=json.load(f)
         return data if isinstance(data,dict) else {}
     except (OSError,json.JSONDecodeError):
         return {}
 
-def save_supplemental_cache(cache):
+def save_supplemental_cache(cache, path=SUPPLEMENTAL_CACHE_PATH):
     os.makedirs("data",exist_ok=True)
-    with open(SUPPLEMENTAL_CACHE_PATH,"w",encoding="utf-8") as f:
+    with open(path,"w",encoding="utf-8") as f:
         json.dump(cache,f,ensure_ascii=False,separators=(",",":"))
 
 def cached_static_rows(path,bearer,cache,fetcher=rows):
@@ -1112,9 +1113,9 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     bearer=token()
     if mode == "--vd-only":
-        section_cache = load_supplemental_cache()
-        fetch_vd_layer(bearer, section_cache)
-        save_supplemental_cache(section_cache)
+        vd_static_cache = load_supplemental_cache(VD_STATIC_CACHE_PATH)
+        fetch_vd_layer(bearer, vd_static_cache)
+        save_supplemental_cache(vd_static_cache, VD_STATIC_CACHE_PATH)
         print("[VD] Independent VD refresh completed.")
         return
     all_segments=[]
@@ -1175,8 +1176,9 @@ def main():
     save_congestion_cache(level_cache)
     save_supplemental_cache(section_cache)
     if mode != "--skip-vd":
-        fetch_vd_layer(bearer, section_cache)
-        save_supplemental_cache(section_cache)
+        vd_static_cache = load_supplemental_cache(VD_STATIC_CACHE_PATH)
+        fetch_vd_layer(bearer, vd_static_cache)
+        save_supplemental_cache(vd_static_cache, VD_STATIC_CACHE_PATH)
     fetch_supplemental_layers(bearer)
     generated_at = datetime.now(TW)
     # 以各路段來源提供的觀測時間計算最新官方資料時間；
