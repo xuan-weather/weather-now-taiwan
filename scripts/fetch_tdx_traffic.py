@@ -334,7 +334,7 @@ def extract_link_ids(value):
                     return
                 except json.JSONDecodeError:
                     pass
-            found.extend(part.strip() for part in re.split(r"[,;|\\s]+", raw) if part.strip())
+            found.extend(part.strip() for part in re.split(r"[,;|\s]+", raw) if part.strip())
     walk(value)
     return list(dict.fromkeys(x for x in found if x))
 
