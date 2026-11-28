@@ -365,7 +365,7 @@
             <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]"></span>
             <div>
               <div class="flex items-center justify-between gap-3"><span class="font-medium">事故與施工通報</span><span id="count-incidents" class="shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold tabular-nums text-amber-300">— 件</span></div>
-              <div class="text-[10px] text-slate-400">車禍、道路施工、散落物與管制</div>
+              <div class="text-[10px] text-slate-400">車禍紅色・施工橘色・故障紫色・障礙黃色・管制藍色</div>
             </div>
           </div>
           <input type="checkbox" id="chk-incidents" checked onchange="toggleMapLayer('incidents', this.checked)" class="accent-sky-500 w-4 h-4 rounded cursor-pointer" />
@@ -846,13 +846,19 @@
     function getIncidentVisual(type) {
       switch (type) {
         case 'accident':
-          return { emoji: '💥', bg: 'bg-red-500', ring: 'bg-red-500', label: '車禍事故' };
+          return { emoji: '💥', bg: 'bg-red-600', ring: 'bg-red-500', label: '車禍事故' };
         case 'roadwork':
-          return { emoji: '🚧', bg: 'bg-amber-500', ring: 'bg-amber-500', label: '道路施工' };
+          return { emoji: '🚧', bg: 'bg-orange-500', ring: 'bg-orange-500', label: '道路施工' };
         case 'breakdown':
-          return { emoji: '🔧', bg: 'bg-orange-500', ring: 'bg-orange-500', label: '車輛故障' };
+          return { emoji: '🔧', bg: 'bg-violet-600', ring: 'bg-violet-500', label: '故障車' };
+        case 'obstruction':
+          return { emoji: '⚠️', bg: 'bg-yellow-500', ring: 'bg-yellow-400', label: '道路障礙' };
+        case 'traffic_control':
+          return { emoji: '🚦', bg: 'bg-sky-600', ring: 'bg-sky-500', label: '交通管制' };
+        case 'congestion':
+          return { emoji: '🚗', bg: 'bg-amber-500', ring: 'bg-amber-400', label: '道路壅塞' };
         default:
-          return { emoji: '⚠️', bg: 'bg-yellow-500', ring: 'bg-yellow-500', label: '道路事件' };
+          return { emoji: '⚠️', bg: 'bg-slate-500', ring: 'bg-slate-400', label: '其他事件' };
       }
     }
 
@@ -1012,9 +1018,54 @@
       }
     }
 
+    async function loadPBSHighwayIncidentMarkers() {
+      // PBS records may contain exact WGS84 coordinates. Never infer a crash point
+      // from a road name/km string when the official feed does not provide coordinates.
+      try {
+        const response = await fetch('./data/pbs-traffic.json?ts=' + Date.now(), { cache: 'no-store' });
+        if (!response.ok) throw new Error('PBS HTTP ' + response.status);
+        const payload = await response.json();
+        const rows = Array.isArray(payload.records) ? payload.records : [];
+        const markers = [];
+        rows.forEach(row => {
+          const roadText = String(row.road || row.areaNm || '');
+          const sourceText = String(row.srcdetail || '');
+          if (!/國道/.test(roadText) || !/高速公路局|國道.*交控中心/.test(sourceText)) return;
+          const text = roadText + ' ' + String(row.comment || '') + ' ' + String(row.roadtype || '');
+          if (/已排除|已恢復正常|排除\*/.test(text)) return;
+          const rawType = String(row.roadtype || '');
+          let type = /事故|車禍|追撞|擦撞|翻覆|碰撞/.test(rawType + ' ' + text) ? 'accident'
+            : (/道路施工|施工/.test(rawType + ' ' + text) ? 'roadwork'
+            : (/故障車|故障車輛|拋錨/.test(text) ? 'breakdown'
+            : (/交通障礙|散落物|掉落物|障礙物/.test(rawType + ' ' + text) ? 'obstruction'
+            : (/阻塞|壅塞|車多/.test(rawType + ' ' + text) ? 'congestion'
+            : (/管制/.test(rawType + ' ' + text) ? 'traffic_control' : 'other')))));
+          const lat = Number(row.lat ?? row.latitude ?? row.Latitude ?? row.y);
+          const lng = Number(row.lng ?? row.lon ?? row.longitude ?? row.Longitude ?? row.x);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 20 || lat > 27 || lng < 118 || lng > 123) return;
+          markers.push({
+            id: 'PBS-' + String(row.UID || markers.length),
+            type, title: roadText.trim(), desc: String(row.comment || ''),
+            time: String(row.happendate || '') + ' ' + String(row.happentime || ''),
+            lane: '', road: roadText, lat, lng, authority: 'Freeway',
+            source: 'PBS', sourceName: sourceText || '警廣／高公局通報'
+          });
+        });
+        if (markers.length) {
+          const combined = new Map(incidentsData.map(row => [String(row.id), row]));
+          markers.forEach(row => combined.set(String(row.id), row));
+          incidentsData = Array.from(combined.values());
+          updateLayerCounts();
+          renderIncidents();
+          console.info('[PBS highway incident markers]', markers.length);
+        }
+      } catch (error) {
+        console.warn('[PBS highway incident markers unavailable]', error);
+      }
+    }
+
     async function loadSupplementalTrafficLayers() {
-      // Each map layer has its own JSON and request. One endpoint failing cannot
-      // prevent the other two layers from being loaded and rendered.
+      // Keep the original TDX layers and supplement them with geocoded PBS/HPA events.
       await Promise.allSettled([
         loadOneSupplementalLayer('tdx-incidents.json', 'incidents',
           rows => { incidentsData = rows; }, renderIncidents),
@@ -1023,6 +1074,7 @@
         loadOneSupplementalLayer('tdx-parking.json', 'parking',
           rows => { parkingData = rows; }, renderParking)
       ]);
+      await loadPBSHighwayIncidentMarkers();
     }
 
     function renderParking() {
