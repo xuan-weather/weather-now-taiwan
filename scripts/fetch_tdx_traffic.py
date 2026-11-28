@@ -577,16 +577,18 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
             if diag is not None: diag["skippedNoSectionReference"]+=1
             continue
         speed=speed_value(item)
-        if speed is None:
-            if diag is not None: diag["skippedNoSpeed"]+=1
-            continue
         raw_group_id = str(item.get("CongestionLevelID", "")).strip()
         authority = first_text(item, ("AuthorityCode", "_FeedAuthorityCode"), "")
         definition = (level_index or {}).get(f"{authority}:{raw_group_id}") or (level_index or {}).get(raw_group_id)
         if definition is None and level_index:
             default_group_id = "A" if region in ("freeway", "highway") else "F"
             definition = level_index.get(default_group_id)
-        status, level_number, level_name = official_congestion_status(item, definition, speed)
+        if speed is None:
+            # 保留有官方路段線型、但當下沒有有效車速的資料；前端以灰色顯示，不推算或補造車速。
+            if diag is not None: diag["skippedNoSpeed"]+=1
+            status, level_number, level_name = "資料不足", None, None
+        else:
+            status, level_number, level_name = official_congestion_status(item, definition, speed)
         for sid in section_ids:
             coords=shape_by_id.get(sid)
             if not coords:
@@ -603,6 +605,7 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
                 "region":region,
                 "regionLabel":label,
                 "speed":speed,
+                "speedAvailable":speed is not None,
                 "travelTime":item.get("TravelTime"),
                 "congestionLevel":item.get("CongestionLevel"),
                 "congestionLevelId":item.get("CongestionLevelID"),
