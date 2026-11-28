@@ -164,6 +164,7 @@
     }
   
     #pbs-traffic-page { overscroll-behavior: contain; }
+    body.quick-menu-open #region-selector-wrap { display: none !important; }
     body.pbs-page-open #layer-controls-wrap,
     body.pbs-page-open #traffic-legend-wrap,
     body.pbs-page-open #map-controls-wrap,
@@ -264,7 +265,7 @@
     <div id="search-results" class="hidden glass-panel rounded-2xl p-1.5 max-h-56 overflow-y-auto pointer-events-auto text-xs"></div>
 
     <!-- 全台縣市快速定位：22 縣市皆可選 -->
-    <div class="flex items-center gap-2 pointer-events-auto">
+    <div id="region-selector-wrap" class="flex items-center gap-2 pointer-events-auto">
       <select id="region-select" aria-label="選擇全台縣市或區域" onchange="flyToRegion(this.value)"
         class="glass-panel min-w-0 flex-1 rounded-full px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-sky-400">
         <option value="taiwan">全台灣總覽</option>
@@ -1232,6 +1233,7 @@
       if (!panel || !button) return;
       const shouldOpen = typeof forceState === 'boolean' ? forceState : panel.classList.contains('hidden');
       panel.classList.toggle('hidden', !shouldOpen);
+      document.body.classList.toggle('quick-menu-open', shouldOpen);
       button.setAttribute('aria-expanded', String(shouldOpen));
       button.setAttribute('aria-label', shouldOpen ? '關閉功能選單' : '開啟功能選單');
     }
