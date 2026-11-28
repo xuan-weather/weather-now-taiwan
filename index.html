@@ -241,6 +241,8 @@ const marker=L.marker([evt.lat,evt.lng],{icon}).addTo(layers.events);
 marker.bindPopup(`<div class="p-3.5"><span class="text-xs font-bold" style="color:${color}">${eventTypeLabel(evt.type)}</span><h4 class="font-bold text-sm my-2">${esc(evt.title)}</h4><div class="text-xs text-cyan-300">${esc(evt.road||'道路位置未提供')}</div><p class="text-xs text-slate-300 mt-2">${esc(evt.desc||'官方事件資料未提供詳細說明')}</p><div class="text-xs text-slate-400 mt-2">發佈/更新：${esc(formatTime(evt.time))}</div><div class="text-[10px] text-slate-500 mt-1">來源：交通部 TDX 道路事件</div></div>`);
 evt.leafletMarker=marker;
 });
+document.getElementById('data-mode-badge').textContent=`● 官方 TDX 資料｜有效 ${roadSegments.length-stale} 段 / 逾期 ${stale} 段`;
+document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
 renderCctvLayer();
 }
 function renderCctvLayer(){
@@ -257,10 +259,6 @@ marker.bindPopup('<div class="p-3"><b class="text-sm">'+esc(cam.name)+'</b><div 
 });
 }
 map.on('zoomend',renderCctvLayer);
-document.getElementById('data-mode-badge')
-document.getElementById('data-mode-badge').textContent=`● 官方 TDX 資料｜有效 ${roadSegments.length-stale} 段 / 逾期 ${stale} 段`;
-document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
-}
 function renderDrawerList(){
 const container=document.getElementById('drawer-content');container.innerHTML='';
 if(currentDrawerTab==='congested'){
