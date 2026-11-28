@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - "scripts/fetch_tdx_traffic.py"
+      - "index.html"
       - ".github/workflows/tdx-traffic.yml"
 permissions:
   contents: write
