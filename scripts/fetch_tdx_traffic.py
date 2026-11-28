@@ -705,7 +705,7 @@ def main():
     os.makedirs("data",exist_ok=True)
     with open("data/tdx-traffic.json","w",encoding="utf-8") as file:
         json.dump(payload,file,ensure_ascii=False,separators=(",",":"))
-    # Publish official road events and real CCTV inventory for the map UI.\n    fetch_supplemental_layers(bearer)\n    print(f"Saved {len(all_segments)} official road sections.")
+    print(f"Saved {len(all_segments)} official road sections.")
 
 if __name__ == "__main__":
     main()
