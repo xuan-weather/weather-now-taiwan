@@ -33,25 +33,22 @@ def normalize_road_text(value):
 
 def parse_milepost_context(text):
     text = normalize_road_text(text)
-    compact = re.sub(r"\\s+", "", text)
-    road_match = re.search(r"(?:國道|國)\\s*(\\d{1,2})(?:號)?", text)
-    # Support both decimal km (337.8km) and K+metres (337K+800),
-    # including official KML placemark names such as 337K+800.
-    km_match = re.search(r"(\\d{1,3})\\s*K\\s*\\+\\s*(\\d{1,3})", text, re.I)
+    road_match = re.search(r"(?:國道|國)\s*(\d{1,2})(?:號)?", text)
+    # Support decimal km (337.8km) and K+metres (337K+800).
+    km_match = re.search(r"(\d{1,3})\s*K\s*\+\s*(\d{1,3})", text, re.I)
     if km_match:
         km = int(km_match.group(1)) + int(km_match.group(2)) / 1000
     else:
-        km_match = re.search(r"(\\d{1,3})(?:\\.(\\d{1,3}))?\\s*(?:KM|K|公里)", text, re.I)
+        km_match = re.search(r"(\d{1,3})(?:\.(\d{1,3}))?\s*(?:KM|K|公里)", text, re.I)
         if not km_match:
             return None
         km = int(km_match.group(1)) + float("0." + (km_match.group(2) or "0"))
     if not road_match:
         return None
-    # KML metadata may use N/S, 北向/南向, 北上/南下 or directional lane labels.
     direction = ""
-    if re.search(r"南下|南向|南行|南向線|SOUTHBOUND|\\bS\\b|\\bS-", text, re.I):
+    if re.search(r"南下|南向|南行|南向線|SOUTHBOUND|\bS\b|\bS-", text, re.I):
         direction = "S"
-    elif re.search(r"北上|北向|北行|北向線|NORTHBOUND|\\bN\\b|\\bN-", text, re.I):
+    elif re.search(r"北上|北向|北行|北向線|NORTHBOUND|\bN\b|\bN-", text, re.I):
         direction = "N"
     if not direction:
         return None
