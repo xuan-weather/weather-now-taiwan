@@ -862,10 +862,23 @@
       }
     }
 
+    function resolveIncidentType(inc) {
+      const text = String((inc.title || '') + ' ' + (inc.desc || '')).toLowerCase();
+      // Specific event semantics take precedence over generic mentions in notices.
+      if (/施工|維護工程|道路工程|workzone|roadwork/.test(text)) return 'roadwork';
+      if (/機動開放路肩|開放路肩|特殊管制|交通管制|匝道儀控|封閉道路|管制通行/.test(text)) return 'traffic_control';
+      if (/車禍|追撞|擦撞|自撞|翻覆|碰撞|事故現場|事故發生|發生事故|事故處理|事故排除/.test(text)) return 'accident';
+      if (/故障車|車輛故障|拋錨|故障車輛/.test(text)) return 'breakdown';
+      if (/散落物|掉落物|障礙物|異物|輪胎皮|鐵條/.test(text)) return 'obstruction';
+      if (/壅塞|阻塞|車多|車流湧現/.test(text)) return 'congestion';
+      return inc.type || 'other';
+    }
+
     function renderIncidents() {
       layers.incidents.clearLayers();
       incidentsData.forEach(inc => {
-        const vis = getIncidentVisual(inc.type);
+        const categoryType = resolveIncidentType(inc);
+        const vis = getIncidentVisual(categoryType);
         const icon = L.divIcon({
           className: 'custom-div-icon',
           html: `
@@ -883,7 +896,7 @@
         const popupHtml = `
           <div class="p-1 max-w-[235px]">
             <div class="flex items-center justify-between gap-2 mb-1">
-              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-500/20 text-red-300 border border-red-500/30">${vis.label}</span>
+              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full ${categoryType === 'accident' ? 'bg-red-500/20 text-red-300 border border-red-500/30' : categoryType === 'roadwork' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' : 'bg-slate-500/20 text-slate-200 border border-white/20'}">${vis.label}</span>
               <span class="text-[10px] text-slate-400">${inc.time}</span>
             </div>
             <div class="text-xs font-bold text-white mb-1 leading-snug">${inc.title}</div>
