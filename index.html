@@ -265,8 +265,8 @@ const marker=L.marker([evt.lat,evt.lng],{icon}).addTo(layers.events);
 marker.bindPopup(`<div class="p-3.5"><span class="text-xs font-bold" style="color:${color}">${eventTypeLabel(evt.type)}</span><h4 class="font-bold text-sm my-2">${esc(evt.title)}</h4><div class="text-xs text-cyan-300">${esc(evt.road||'道路位置未提供')}</div><p class="text-xs text-slate-300 mt-2">${esc(evt.desc||'官方事件資料未提供詳細說明')}</p><div class="text-xs text-slate-400 mt-2">發佈/更新：${esc(formatTime(evt.time))}</div><div class="text-[10px] text-slate-500 mt-1">來源：交通部 TDX 道路事件</div></div>`);
 evt.leafletMarker=marker;
 });
-const cityCoverage=sourceMeta.cityCoverage||{},cityOk=Number(cityCoverage.successful)||0,cityExpected=Number(cityCoverage.expected)||22;
-document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${freshCount} / ${roadSegments.length} 段｜分級待確認 ${unclassified}｜縣市有路況 ${cityOk}/${cityExpected}`;
+const cityCoverage=sourceMeta.cityCoverage||{},cityOk=Number(cityCoverage.successful)||0,cityApi=Number(cityCoverage.apiResponded)||0,cityExpected=Number(cityCoverage.expected)||22;
+document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${freshCount} / ${roadSegments.length} 段｜分級待確認 ${unclassified}｜縣市 API回應 ${cityApi}/${cityExpected}・有路況 ${cityOk}/${cityExpected}`;
 document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
 renderCctvLayer();
 }
