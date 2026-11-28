@@ -22,35 +22,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # VD 每分鐘資料先獨立抓取並先行發布，避免等待全台道路線型與其他圖層完成。
-      - name: Refresh nationwide VD live data first
-        env:
-          TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
-          TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
-        run: python scripts/fetch_tdx_traffic.py --vd-only
-      - name: Publish VD snapshot immediately
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/tdx-vd.json data/tdx-layers-cache.json
-          if git diff --cached --quiet; then
-            echo "VD snapshot and static cache are unchanged."
-            exit 0
-          fi
-          git commit -m "Refresh nationwide TDX VD live data"
-          for attempt in 1 2 3; do
-            git fetch origin main
-            git rebase origin/main
-            if git push origin HEAD:main; then
-              echo "VD snapshot published before the full traffic refresh."
-              exit 0
-            fi
-            echo "VD push raced with another update; retry $attempt/3."
-            sleep 2
-          done
-          echo "Unable to publish VD snapshot after 3 attempts."
-          exit 1
       - name: Fetch nationwide official TDX traffic
         env:
           TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
@@ -69,7 +40,6 @@ jobs:
           cp data/tdx-congestion-definitions.json "$DATA_DIR/"
           cp data/tdx-layers.json "$DATA_DIR/"
           cp data/tdx-layers-cache.json "$DATA_DIR/"
-          cp data/tdx-vd.json "$DATA_DIR/"
 
           for attempt in 1 2 3; do
             echo "Sync and push attempt $attempt/3"
@@ -118,10 +88,9 @@ jobs:
             cp "$DATA_DIR/tdx-congestion-definitions.json" data/
             cp "$DATA_DIR/tdx-layers.json" data/
             cp "$DATA_DIR/tdx-layers-cache.json" data/
-            cp "$DATA_DIR/tdx-vd.json" data/
 
             # Stage refreshed files before checking whether there are changes.
-            git add data/tdx-traffic.json data/tdx-shapes-cache.json data/tdx-congestion-definitions.json data/tdx-layers.json data/tdx-layers-cache.json data/tdx-vd.json
+            git add data/tdx-traffic.json data/tdx-shapes-cache.json data/tdx-congestion-definitions.json data/tdx-layers.json data/tdx-layers-cache.json
 
             if git diff --cached --quiet; then
               echo "No traffic data changes."
