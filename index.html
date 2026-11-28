@@ -191,7 +191,7 @@ all:{center:[23.75,120.95],zoom:8,name:'全台路網'}
 };
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const parseDate=v=>{if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d;};
-function segmentFresh(seg){const speed=Number(seg.speed);const d=parseDate(seg.updateTime);const age=d?Date.now()-d.getTime():Infinity;return Number.isFinite(speed)&&speed>0&&speed<=200&&!!d&&age>=-5*60*1000&&age<=30*60*1000;}
+function segmentFresh(seg){const speed=Number(seg.speed);const d=parseDate(seg.updateTime);const age=d?Date.now()-d.getTime():Infinity;return Number.isFinite(speed)&&speed>=0&&speed<=200&&!!d&&age>=-5*60*1000&&age<=30*60*1000;}
 function segmentInViewport(seg,bounds){const b=seg._bounds;if(!b)return true;return b[0]<=bounds.getNorth()&&b[2]>=bounds.getSouth()&&b[1]<=bounds.getEast()&&b[3]>=bounds.getWest();}
 function formatTime(v){const d=parseDate(v);return d?d.toLocaleString('zh-TW',{hour12:false}):'時間未提供';}
 function routeMeta(seg){
@@ -203,13 +203,19 @@ const provincial=seg.region==='highway';
 const highway=n?`N${n}`:(freeway?'OTHER_FREEWAY':provincial?'HIGHWAY':'CITY');
 return {highway,highwayName:n?`國道${n}號`:freeway?'國道/快速道路':provincial?'省道':'市區道路'};
 }
-function getSpeedStyle(speed,fresh=true){
-if(!fresh)return {color:'#94a3b8',glow:'',label:Number(speed)===0?'車速待確認':'待確認/逾期',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'};
-if(speed>=80)return {color:'#10b981',glow:'glow-green',label:'順暢',badgeBg:'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'};
-if(speed>=60)return {color:'#f59e0b',glow:'glow-yellow',label:'車多',badgeBg:'bg-amber-500/20 text-amber-400 border-amber-500/40'};
-if(speed>=40)return {color:'#f97316',glow:'glow-orange',label:'壅塞',badgeBg:'bg-orange-500/20 text-orange-400 border-orange-500/40'};
-if(speed>=20)return {color:'#ef4444',glow:'glow-red',label:'嚴重壅塞',badgeBg:'bg-rose-500/20 text-rose-400 border-rose-500/40'};
-return {color:'#a855f7',glow:'glow-purple',label:'極度壅塞',badgeBg:'bg-purple-500/20 text-purple-300 border-purple-500/50'};
+function getTrafficStyle(seg,fresh=true){
+if(!fresh)return {color:'#94a3b8',glow:'',label:'待確認/逾期',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'};
+const status=String(seg.congestionStatus||'').trim();
+const styles={
+'順暢':{color:'#10b981',glow:'glow-green',label:'順暢',badgeBg:'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'},
+'車多':{color:'#f59e0b',glow:'glow-yellow',label:'車多',badgeBg:'bg-amber-500/20 text-amber-400 border-amber-500/40'},
+'壅塞':{color:'#f97316',glow:'glow-orange',label:'壅塞',badgeBg:'bg-orange-500/20 text-orange-400 border-orange-500/40'},
+'嚴重壅塞':{color:'#ef4444',glow:'glow-red',label:'嚴重壅塞',badgeBg:'bg-rose-500/20 text-rose-400 border-rose-500/40'},
+'極度壅塞':{color:'#a855f7',glow:'glow-purple',label:'極度壅塞',badgeBg:'bg-purple-500/20 text-purple-300 border-purple-500/50'},
+'道路封閉':{color:'#dc2626',glow:'glow-red',label:'道路封閉',badgeBg:'bg-rose-500/20 text-rose-300 border-rose-500/50'},
+'資料不足':{color:'#64748b',glow:'',label:'官方資料不足',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'}
+};
+return styles[status]||{color:'#94a3b8',glow:'',label:'官方分級待確認',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'};
 }
 function passesFilter(item){return activeHighways.has('ALL')||activeHighways.has(item.highway)||activeHighways.has(item.category);}
 function buildHighwayFilters(){
@@ -225,8 +231,8 @@ const viewport=map.getBounds();
 let smooth=0,busy=0,congested=0,stale=0;
 roadSegments.forEach(seg=>{
 if(!Array.isArray(seg.coords)||seg.coords.length<2)return;
-const fresh=segmentFresh(seg),speed=Number(seg.speed),style=getSpeedStyle(speed,fresh);
-if(!fresh)stale++;else if(speed>=80)smooth++;else if(speed>=60)busy++;else congested++;
+const fresh=segmentFresh(seg),speed=Number(seg.speed),style=getTrafficStyle(seg,fresh);
+if(!fresh)stale++;else if(seg.congestionStatus==='順暢')smooth++;else if(seg.congestionStatus==='車多')busy++;else if(['壅塞','嚴重壅塞','極度壅塞','道路封閉'].includes(seg.congestionStatus))congested++;else stale++;
 const zoom=map.getZoom();
 if(!passesFilter(seg)||!segmentInViewport(seg,viewport))return;
 // 全台總覽先顯示國道、省道；縣市道路放大至第 10 級才加入，避免低縮放時數千條市區道路擠在一起。
@@ -234,7 +240,7 @@ if(!passesFilter(seg)||!segmentInViewport(seg,viewport))return;
 if(zoom<10&&seg.region!=='freeway'&&seg.region!=='highway')return;
 // Canvas 單層繪製，避免 SVG 與發光濾鏡造成額外重繪。
 const line=L.polyline(seg.coords,{renderer:map.getRenderer(map),color:style.color,weight:4,opacity:fresh?.92:.55,lineCap:'round',lineJoin:'round',interactive:true}).addTo(layers.traffic);
-line.bindPopup(`<div class="p-3.5"><div class="flex items-center justify-between gap-2 mb-2"><b class="text-xs text-cyan-300">${esc(seg.highwayName)}</b><span class="text-xs">${style.label}</span></div><h4 class="font-bold text-sm mb-2">${esc(seg.name)}</h4><div class="text-sm">車速：<b style="color:${style.color}">${fresh&&Number.isFinite(speed)?Math.round(speed)+' km/h':'待確認'}</b></div><div class="text-xs text-slate-400 mt-1">觀測時間：${esc(formatTime(seg.updateTime))}</div><div class="text-xs text-slate-500 mt-1">來源：${esc(seg.sourceLabel||'交通部 TDX')}</div></div>`);
+line.bindPopup(`<div class="p-3.5"><div class="flex items-center justify-between gap-2 mb-2"><b class="text-xs text-cyan-300">${esc(seg.highwayName)}</b><span class="text-xs">${style.label}</span></div><h4 class="font-bold text-sm mb-2">${esc(seg.name)}</h4><div class="text-sm">車速：<b style="color:${style.color}">${fresh&&Number.isFinite(speed)?Math.round(speed)+' km/h':'待確認'}</b></div><div class="text-xs text-slate-400 mt-1">觀測時間：${esc(formatTime(seg.updateTime))}</div><div class="text-xs text-cyan-300 mt-1">官方分級：${esc(seg.congestionStatus||'未提供')}</div><div class="text-xs text-slate-500 mt-1">來源：${esc(seg.sourceLabel||'交通部 TDX')}</div></div>`);
 seg.leafletLayer=line;
 });
 document.getElementById('stat-smooth').textContent=smooth;
@@ -278,7 +284,7 @@ if(currentDrawerTab==='congested'){
 const items=roadSegments.filter(s=>passesFilter(s)&&segmentFresh(s)).sort((a,b)=>Number(a.speed)-Number(b.speed)).slice(0,80);
 if(!items.length){container.innerHTML='<div class="text-center text-xs text-slate-400 py-8">目前沒有可確認時間的官方路段資料</div>';return;}
 items.forEach(seg=>{
-const style=getSpeedStyle(Number(seg.speed),true);const card=document.createElement('div');
+const style=getTrafficStyle(seg,true);const card=document.createElement('div');
 card.className='p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800/90 border border-slate-700/50 transition cursor-pointer group';
 card.onclick=()=>{const c=seg.coords[Math.floor(seg.coords.length/2)];map.flyTo(c,13,{duration:1});if(seg.leafletLayer)setTimeout(()=>seg.leafletLayer.openPopup(),500);};
 card.innerHTML=`<div class="flex items-center justify-between gap-2 mb-1.5"><div class="flex items-center gap-1.5"><span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-700">${esc(seg.highwayName)}</span><span class="text-[10px] text-slate-400">${esc(seg.direction||'')}</span></div><span class="text-[10px] font-semibold px-2 py-0.5 rounded border ${style.badgeBg}">${style.label}</span></div><div class="flex items-center justify-between gap-2"><div class="text-xs font-bold text-slate-100">${esc(seg.name)}</div><div class="text-right shrink-0"><div class="font-mono font-bold text-lg" style="color:${style.color}">${Math.round(Number(seg.speed))}</div><div class="text-[9px] text-slate-500">km/h</div></div></div><div class="text-[10px] text-slate-500 mt-1">觀測時間：${esc(formatTime(seg.updateTime))}</div>`;
@@ -322,7 +328,7 @@ document.getElementById('last-update-time').textContent=official?formatTime(offi
 lastFetchAt=new Date();
 document.getElementById('countdown-timer').textContent='300s';countdownSeconds=300;
 buildHighwayFilters();renderMapObjects();renderDrawerList();
-if(isManual)showToast(`已載入 ${roadSegments.length} 段官方路況、${trafficEvents.length} 筆事件`);
+if(isManual)showToast(`已載入 ${roadSegments.length} 段官方路況、${trafficEvents.length} 筆事件、${liveCctv.length} 支攝影機`);
 }catch(err){
 document.getElementById('data-mode-badge').textContent='● 官方資料讀取失敗/尚未更新';
 document.getElementById('data-mode-badge').className='text-amber-400 font-medium';
