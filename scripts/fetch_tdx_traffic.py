@@ -16,7 +16,7 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 8.0  # 以 8 秒作為 TDX 共用請求間隔，降低 6 秒測試時出現的 HTTP 429
+MIN_REQUEST_INTERVAL = 10.0  # 10 秒全域節流；降低 TDX Retry-After 429 重試，避免工作流程排隊
 _last_request_at = 0.0
 
 # TDX 各路況端點的 City enum 不相同，依錯誤回應列出的清單分開設定。
@@ -1000,6 +1000,25 @@ def fetch_vd_layer(bearer, static_cache):
     stats_by_key = {}
     fetch_started_at = datetime.now(TW)
 
+    # Preserve the last known live observations when a lower-priority source is
+    # skipped or temporarily unavailable. Their original DataCollectTime is
+    # retained, so freshness calculations still mark them stale accurately.
+    previous_live = {}
+    try:
+        with open("data/tdx-vd.json", "r", encoding="utf-8") as previous_file:
+            previous_payload = json.load(previous_file)
+        for previous_device in previous_payload.get("devices", []):
+            if not isinstance(previous_device, dict):
+                continue
+            previous_id = str(previous_device.get("id") or "").strip().upper()
+            previous_type = str(previous_device.get("sourceType") or "").strip()
+            previous_code = str(previous_device.get("sourceCode") or "").strip()
+            if previous_id and previous_type and previous_code:
+                previous_live[f"{previous_type}:{previous_code}:{previous_id}"] = previous_device
+        print(f"[VD CACHE] loaded previous live observations for {len(previous_live)} devices")
+    except (OSError, json.JSONDecodeError, TypeError):
+        print("[VD CACHE] no usable previous VD snapshot; starting with static inventory")
+
     static_started_at = time.monotonic()
     for code, label, source_type in static_sources:
         source_started_at = time.monotonic()
@@ -1023,7 +1042,8 @@ def fetch_vd_layer(bearer, static_cache):
                 if not vd_id or not point:
                     continue
                 links = collection_items(item.get("DetectionLinks"), "DetectionLink")
-                devices[key_prefix + vd_id.upper()] = {
+                device_key = key_prefix + vd_id.upper()
+                device = {
                     "id": vd_id,
                     "sourceType": source_type,
                     "sourceCode": code,
@@ -1051,6 +1071,19 @@ def fetch_vd_layer(bearer, static_cache):
                         for link in links
                     ]
                 }
+                previous = previous_live.get(device_key)
+                if previous:
+                    for live_field in (
+                        "linkIds", "laneCount", "speed", "speedSource",
+                        "validLaneSpeedCount", "validVehicleSpeedCount",
+                        "speedDiagnostics", "occupancy", "volumePerMinute",
+                        "vehicleVolumes", "status", "dataCollectTime",
+                        "sourceUpdateTime", "speedAvailable", "flowAvailable",
+                        "occupancyAvailable"
+                    ):
+                        if live_field in previous:
+                            device[live_field] = previous[live_field]
+                devices[device_key] = device
             stat["validDevices"] = sum(1 for key in devices if key.startswith(key_prefix))
             stat["staticOK"] = True
             print(f"[VD STATIC] {label}: records={stat['staticRecords']} mapped={stat['validDevices']}")
@@ -1061,6 +1094,8 @@ def fetch_vd_layer(bearer, static_cache):
 
     static_fetch_seconds = round(time.monotonic() - static_started_at, 2)
     live_started_at = time.monotonic()
+    live_fetch_budget_seconds = 210
+    primary_live_codes = {"Highway", "Freeway", "Taipei", "Taichung", "Tainan", "Kaohsiung", "Taoyuan"}
     for code, label, source_type in live_sources:
         source_started_at = time.monotonic()
         source_key = (source_type, code)
@@ -1074,6 +1109,14 @@ def fetch_vd_layer(bearer, static_cache):
         live_path = f"Road/Traffic/Live/VD/{'City/' if source_type == 'city' else ''}{code}"
         # Do not spend a TDX request on a source whose static inventory is
         # unavailable or contains no mappable VD devices.
+        elapsed_live_seconds = time.monotonic() - live_started_at
+        if code not in primary_live_codes and elapsed_live_seconds >= live_fetch_budget_seconds:
+            stat["liveSkippedTimeBudget"] = True
+            print(
+                f"[VD LIVE SKIP] {label}: live-fetch budget reached "
+                f"({int(elapsed_live_seconds)}s); retaining timestamped previous observations"
+            )
+            continue
         if not any(key.startswith(key_prefix) for key in devices):
             stat["liveSkippedNoStaticDevices"] = True
             print(f"[VD LIVE SKIP] {label}: no mapped static VD devices")
@@ -1185,6 +1228,8 @@ def fetch_vd_layer(bearer, static_cache):
             "total": round(static_fetch_seconds + live_fetch_seconds, 2)
         },
         "updateIntervalSeconds": 60,
+        "liveFetchBudgetSeconds": live_fetch_budget_seconds,
+        "liveUpdatePolicy": "National Highway/Freeway and major metro feeds are prioritized; secondary city feeds are fetched when the 210-second live-fetch budget allows. Skipped sources retain their original observation timestamps and are counted stale when older than the 5-minute freshness window.",
         "totalDevices": len(devices),
         "liveDevices": live_devices,
         "liveSpeedDevices": live_speed_devices,
