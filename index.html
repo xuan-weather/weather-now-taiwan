@@ -280,11 +280,25 @@ function vdIsFresh(device){
 const d=parseDate(device.dataCollectTime),age=d?Date.now()-d.getTime():Infinity;
 return Number(device.status)===0&&age>=-2*60*1000&&age<=5*60*1000&&device.speed!==null&&device.speed!==undefined&&device.speed!==''&&Number.isFinite(Number(device.speed))&&Number(device.speed)>=0&&Number(device.speed)<=200;
 }
+async function refreshVDData(){
+try{
+const response=await fetch('./data/tdx-vd.json?ts='+Date.now(),{cache:'no-store'});
+if(!response.ok)throw new Error('VD 資料 HTTP '+response.status);
+const payload=await response.json();
+if(!Array.isArray(payload.devices))throw new Error('VD 官方資料格式不正確');
+const incoming=parseDate(payload.generatedAt),current=parseDate(vdMeta.generatedAt);
+if(current&&incoming&&incoming<=current)return;
+vdDevices=payload.devices.map(d=>({...d,lat:Number(d.lat),lng:Number(d.lng)})).filter(d=>Number.isFinite(d.lat)&&Number.isFinite(d.lng));
+vdMeta=payload;
+renderVDLayer();
+}catch(error){console.warn('[TDX VD] 獨立更新失敗，保留目前資料：',error);}
+}
 function renderVDLayer(){
 layers.vd.clearLayers();
 const count=document.getElementById('vd-count-label');
 const freshCount=vdDevices.filter(vdIsFresh).length;
-if(count)count.textContent=vdDevices.length?(vdDevices.length+' 個官方點位・'+(freshCount?freshCount+' 筆即時':'動態資料待載入')):'官方 VD 點位資料尚未載入';
+const snapshotTime=vdMeta.generatedAt?formatTime(vdMeta.generatedAt):'快照時間未提供';
+if(count)count.textContent=vdDevices.length?(vdDevices.length+' 個官方點位・'+freshCount+' 筆即時・更新 '+snapshotTime):'官方 VD 點位資料尚未載入';
 const toggle=document.getElementById('toggle-vd');
 if(!toggle||!toggle.checked||map.getZoom()<11)return;
 const bounds=map.getBounds();
@@ -400,5 +414,7 @@ function closeTdxModal(){document.getElementById('tdx-modal').classList.add('hid
 function setDataMode(){showToast('本網站僅顯示官方 TDX 資料，不提供模擬模式');}
 let toastTimeout;function showToast(msg){const t=document.getElementById('toast-notification');document.getElementById('toast-message').textContent=msg;t.classList.remove('opacity-0');clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>t.classList.add('opacity-0'),2800);}
 document.addEventListener('DOMContentLoaded',()=>{if(window.innerWidth<1024)toggleLeftPanel();buildHighwayFilters();loadOfficialTraffic(false);});
+// VD 官方動態資料依交通部每分鐘更新頻率獨立刷新，不必等待整張路況圖層的 5 分鐘輪詢。
+setInterval(refreshVDData,60*1000);
 setInterval(()=>{countdownSeconds=Math.max(0,countdownSeconds-1);document.getElementById('countdown-timer').textContent=countdownSeconds+'s';if(countdownSeconds===0)loadOfficialTraffic(false);},1000);
 </script></body></html>
