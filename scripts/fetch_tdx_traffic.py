@@ -16,7 +16,7 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 6.0  # 全台 VD 與道路路況共用單一序列工作；在保留 429 退避的前提下縮短更新週期
+MIN_REQUEST_INTERVAL = 8.0  # 以 8 秒作為 TDX 共用請求間隔，降低 6 秒測試時出現的 HTTP 429
 _last_request_at = 0.0
 
 # TDX 各路況端點的 City enum 不相同，依錯誤回應列出的清單分開設定。
@@ -95,7 +95,7 @@ def get_json(url, headers=None, body=None):
     request_headers.update(headers or {})
     req = Request(url, headers=request_headers, data=body, method="POST" if body is not None else "GET")
     for attempt in range(6):
-        # TDX API 共用節流；一般請求間隔 12 秒；遇到 429 嚴格依 Retry-After／退避策略等待。
+        # TDX API 共用節流；一般請求間隔 8 秒；遇到 429 嚴格依 Retry-After／退避策略等待。
         elapsed = time.monotonic() - _last_request_at
         if elapsed < MIN_REQUEST_INTERVAL:
             time.sleep(MIN_REQUEST_INTERVAL - elapsed)
