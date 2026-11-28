@@ -27,14 +27,14 @@ CHINESE_DIGITS = {"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","�
 def normalize_road_text(value):
     value = str(value or "").translate(str.maketrans("０１２３４５６７８９", "0123456789"))
     for chinese, number in CHINESE_DIGITS.items():
-        value = re.sub(r"國道\\s*" + chinese + r"(?:號)?", "國道" + number + "號", value)
+        value = re.sub(r"國道\s*" + chinese + r"(?:號)?", "國道" + number + "號", value)
     return value
 
 
 def parse_milepost_context(text):
     text = normalize_road_text(text)
-    road_match = re.search(r"國道\\s*(\\d{1,2})(?:號)?", text)
-    km_match = re.search(r"(\\d{1,3})\\s*K(?:\\s*\\+\\s*(\\d{1,3}))?", text, re.I)
+    road_match = re.search(r"國道\s*(\d{1,2})(?:號)?", text)
+    km_match = re.search(r"(\d{1,3})\s*K(?:\s*\+\s*(\d{1,3}))?", text, re.I)
     if not road_match or not km_match:
         return None
     direction = "N" if re.search(r"北上|北向|北行", text) else ("S" if re.search(r"南下|南向|南行", text) else "")
@@ -94,7 +94,7 @@ def load_highway_mileposts():
     response.raise_for_status()
     points = parse_kml_mileposts(response.content)
     MILEPOST_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    MILEPOST_CACHE.write_text(json.dumps({"fetchedAt": datetime.now(timezone.utc).isoformat(), "source": MILEPOST_URL, "points": points}, ensure_ascii=False, separators=(",", ":")) + "\\n", encoding="utf-8")
+    MILEPOST_CACHE.write_text(json.dumps({"fetchedAt": datetime.now(timezone.utc).isoformat(), "source": MILEPOST_URL, "points": points}, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     print(f"Loaded {len(points)} official freeway milepost coordinates")
     return points
 
