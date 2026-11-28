@@ -838,6 +838,7 @@ def summarize_vd_live(live):
     occupancies = []
     lane_count = 0
     volume_records = 0
+    used_top_level_speed = False
     vehicle_volumes = {"M": 0, "S": 0, "L": 0, "T": 0}
     for link in collection_items(live.get("LinkFlows"), "LinkFlow"):
         link_id = str(link.get("LinkID") or "").strip()
@@ -874,6 +875,7 @@ def summarize_vd_live(live):
         top_speed = number_or_none(field_value(live, "Speed", "LaneSpeed", "AverageSpeed"), 0, 200)
         if top_speed is not None:
             lane_speeds.append(top_speed)
+            used_top_level_speed = True
     if not occupancies:
         top_occupancy = number_or_none(field_value(live, "Occupancy", "LaneOccupancy"), 0, 100)
         if top_occupancy is not None:
@@ -897,7 +899,7 @@ def summarize_vd_live(live):
         status = None
     if lane_speeds:
         speed = round(sum(lane_speeds) / len(lane_speeds), 1)
-        speed_source = "Lane.Speed" if lane_count else "VDLive.Speed"
+        speed_source = "VDLive.Speed" if used_top_level_speed else "Lane.Speed"
     elif vehicle_speeds:
         total_weight = sum(weight for _value, weight in vehicle_speeds)
         speed = round(sum(value * weight for value, weight in vehicle_speeds) / total_weight, 1)
