@@ -2,7 +2,7 @@
 """Fetch nationwide official live road sections from the MOTC TDX API."""
 import gzip, json, os, re, sys, time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from email.utils import parsedate_to_datetime
@@ -124,7 +124,18 @@ def get_json(url, headers=None, body=None):
                             wait = None
                 if wait is None:
                     wait = min(180, 30 * (2 ** attempt))
-                print(f"[RATE LIMIT] TDX HTTP 429; cooldown {wait}s before retry {attempt + 1}/5", file=sys.stderr)
+                endpoint = urlsplit(url).path
+                limit_headers = {
+                    key: exc.headers.get(key)
+                    for key in ("Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset")
+                    if exc.headers.get(key) is not None
+                }
+                print(
+                    f"[RATE LIMIT] TDX HTTP 429 endpoint={endpoint} "
+                    f"headers={json.dumps(limit_headers, ensure_ascii=False)} "
+                    f"cooldown={wait}s retry={attempt + 1}/5",
+                    file=sys.stderr
+                )
                 time.sleep(wait)
                 continue
             raise RuntimeError(f"HTTP {exc.code} for {url}: {detail}") from exc
