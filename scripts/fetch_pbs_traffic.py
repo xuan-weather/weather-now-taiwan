@@ -12,6 +12,148 @@ from pathlib import Path
 
 import requests
 
+import re
+import zipfile
+import io
+import xml.etree.ElementTree as ET
+from math import radians, sin, cos, sqrt, atan2
+
+MILEPOST_URL = "https://www.freeway.gov.tw/UserFiles/file/%E5%9C%8B%E9%81%93%E7%99%BE%E5%85%AC%E5%B0%BA%E9%87%8C%E7%A8%8B%E6%A8%81KML/%E6%95%B4%E6%A8%81%E5%8F%8A%E7%99%BE%E5%85%AC%E5%B0%BA%E9%87%8C%E7%A8%8B%E6%A8%81KML%28schema%E5%8A%A0%E5%85%A5%29.zip"
+MILEPOST_CACHE = Path("data/highway-mileposts.json")
+MILEPOST_CACHE_TTL = 30 * 24 * 60 * 60
+CHINESE_DIGITS = {"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","七":"7","八":"8","九":"9","十":"10"}
+
+
+def normalize_road_text(value):
+    value = str(value or "").translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    for chinese, number in CHINESE_DIGITS.items():
+        value = re.sub(r"國道\\s*" + chinese + r"(?:號)?", "國道" + number + "號", value)
+    return value
+
+
+def parse_milepost_context(text):
+    text = normalize_road_text(text)
+    road_match = re.search(r"國道\\s*(\\d{1,2})(?:號)?", text)
+    km_match = re.search(r"(\\d{1,3})\\s*K(?:\\s*\\+\\s*(\\d{1,3}))?", text, re.I)
+    if not road_match or not km_match:
+        return None
+    direction = "N" if re.search(r"北上|北向|北行", text) else ("S" if re.search(r"南下|南向|南行", text) else "")
+    if not direction:
+        return None
+    km = int(km_match.group(1)) + int(km_match.group(2) or 0) / 1000
+    return road_match.group(1), direction, km
+
+
+def parse_kml_mileposts(raw_zip):
+    archive = zipfile.ZipFile(io.BytesIO(raw_zip))
+    kml_name = next((name for name in archive.namelist() if name.lower().endswith(".kml")), None)
+    if not kml_name:
+        raise ValueError("Official freeway milepost archive contains no KML")
+    root = ET.fromstring(archive.read(kml_name))
+    ns = {"k": "http://www.opengis.net/kml/2.2"}
+    points = []
+
+    def walk(node, inherited=""):
+        tag = node.tag.rsplit("}", 1)[-1]
+        if tag == "Folder":
+            folder_name = node.find("k:name", ns)
+            inherited = (inherited + " " + (folder_name.text if folder_name is not None and folder_name.text else "")).strip()
+        if tag == "Placemark":
+            name = node.findtext("k:name", default="", namespaces=ns)
+            desc = node.findtext("k:description", default="", namespaces=ns)
+            coord_node = node.find(".//k:Point/k:coordinates", ns)
+            if coord_node is not None and coord_node.text:
+                values = coord_node.text.strip().split(",")
+                if len(values) >= 2:
+                    try:
+                        lng, lat = float(values[0]), float(values[1])
+                        parsed = parse_milepost_context(inherited + " " + name + " " + desc)
+                        if parsed and 20 <= lat <= 27 and 118 <= lng <= 123:
+                            road, direction, km = parsed
+                            points.append({"road": road, "direction": direction, "km": km, "lat": lat, "lng": lng})
+                    except (TypeError, ValueError):
+                        pass
+        for child in list(node):
+            walk(child, inherited)
+
+    walk(root)
+    if not points:
+        raise ValueError("No direction-specific highway milepost coordinates parsed from official KML")
+    return points
+
+
+def load_highway_mileposts():
+    try:
+        cached = json.loads(MILEPOST_CACHE.read_text(encoding="utf-8"))
+        fetched = datetime.fromisoformat(cached.get("fetchedAt", "").replace("Z", "+00:00"))
+        if (datetime.now(timezone.utc) - fetched).total_seconds() < MILEPOST_CACHE_TTL and cached.get("points"):
+            return cached["points"]
+    except (OSError, ValueError, TypeError):
+        pass
+    response = requests.get(MILEPOST_URL, headers={"User-Agent": "Mozilla/5.0 Xuan-Traffic"}, timeout=(15, 60))
+    response.raise_for_status()
+    points = parse_kml_mileposts(response.content)
+    MILEPOST_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    MILEPOST_CACHE.write_text(json.dumps({"fetchedAt": datetime.now(timezone.utc).isoformat(), "source": MILEPOST_URL, "points": points}, ensure_ascii=False, separators=(",", ":")) + "\\n", encoding="utf-8")
+    print(f"Loaded {len(points)} official freeway milepost coordinates")
+    return points
+
+
+def haversine_km(a, b):
+    lat1, lon1, lat2, lon2 = map(radians, (a[0], a[1], b[0], b[1]))
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    return 6371 * 2 * atan2(sqrt(h), sqrt(1 - h))
+
+
+def geocode_highway_incidents(records):
+    try:
+        mileposts = load_highway_mileposts()
+    except Exception as exc:
+        print(f"::warning::Official highway milepost lookup unavailable; coordinate-free crash reports remain in the feed: {exc}")
+        return 0
+    index = {}
+    for point in mileposts:
+        index.setdefault((point["road"], point["direction"]), []).append(point)
+    geocoded = 0
+    for row in records:
+        if not isinstance(row, dict) or not re.search(r"國道", normalize_road_text(row.get("road") or row.get("areaNm"))):
+            continue
+        if not re.search(r"事故|車禍", str(row.get("roadtype", "")) + " " + str(row.get("comment", ""))):
+            continue
+        # Keep original official coordinates when the PBS JSON feed supplies them.
+        try:
+            lat = float(row.get("y1") or row.get("lat"))
+            lng = float(row.get("x1") or row.get("lng"))
+            if 20 <= lat <= 27 and 118 <= lng <= 123:
+                row["lat"], row["lng"] = lat, lng
+                row["coordinateSource"] = "PBS official coordinates"
+                row["locationPrecision"] = "official"
+                continue
+        except (TypeError, ValueError):
+            pass
+        parsed = parse_milepost_context(row.get("road") or row.get("areaNm"))
+        if not parsed:
+            parsed = parse_milepost_context(str(row.get("road") or "") + " " + str(row.get("comment") or ""))
+        if not parsed:
+            continue
+        road, direction, km = parsed
+        candidates = index.get((road, direction), [])
+        if not candidates:
+            continue
+        nearest = min(candidates, key=lambda point: abs(point["km"] - km))
+        delta = abs(nearest["km"] - km)
+        # The KML is spaced at 100 m; reject a match farther than 0.6 km.
+        if delta > 0.6:
+            continue
+        row["lat"], row["lng"] = nearest["lat"], nearest["lng"]
+        row["coordinateSource"] = "Freeway Bureau 100m milepost KML"
+        row["locationPrecision"] = "milepost-estimate"
+        row["matchedMilepostKm"] = nearest["km"]
+        geocoded += 1
+    print(f"Geocoded {geocoded} coordinate-free active highway crash reports using official 100m milepost points")
+    return geocoded
+
 JSON_URL = "https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata"
 PBS_PAGE_URL = "https://www.pbs.gov.tw/cht/index.php?code=list&ids=30"
 OUT = Path("data/pbs-traffic.json")
@@ -152,6 +294,8 @@ def main():
             print("No previous PBS snapshot exists; waiting for a successful official source response.")
         return
 
+    records = payload if isinstance(payload, list) else next((payload.get(key) for key in ("records", "data", "Data", "result", "Result", "roadData", "RoadData", "items", "Items") if isinstance(payload.get(key), list)), [])
+    geocode_highway_incidents(records)
     result = {
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
         "source": source,
