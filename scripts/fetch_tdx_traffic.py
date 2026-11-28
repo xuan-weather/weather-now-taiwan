@@ -1082,29 +1082,63 @@ def fetch_vd_layer(bearer, static_cache):
     live_occupancy_devices = 0
     stale_devices = 0
     status_counts = {}
+    freshness_by_source = {}
     for device in devices.values():
         status_key = str(device.get("status")) if device.get("status") is not None else "unknown"
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
+        source_key = (device.get("sourceType"), device.get("sourceCode"))
+        source_fresh = freshness_by_source.setdefault(source_key, {
+            "fresh": 0, "freshSpeed": 0, "stale": 0,
+            "missingTime": 0, "invalidTime": 0, "ages": []
+        })
         # 只用設備 DataCollectTime 判斷新鮮度；來源檔案 UpdateTime 不代表設備觀測時間。
         if not device.get("dataCollectTime"):
+            source_fresh["missingTime"] += 1
             continue
         try:
             collected = datetime.fromisoformat(str(device["dataCollectTime"]).replace("Z", "+00:00"))
             if collected.tzinfo is None:
                 collected = collected.replace(tzinfo=TW)
             age = (now - collected.astimezone(TW)).total_seconds()
+            source_fresh["ages"].append(age)
             if device.get("status") == 0 and -120 <= age <= 300:
                 live_devices += 1
+                source_fresh["fresh"] += 1
                 if number_or_none(device.get("speed"), 0, 200) is not None:
                     live_speed_devices += 1
+                    source_fresh["freshSpeed"] += 1
                 if device.get("volumePerMinute") is not None:
                     live_flow_devices += 1
                 if number_or_none(device.get("occupancy"), 0, 100) is not None:
                     live_occupancy_devices += 1
             elif age > 300:
                 stale_devices += 1
+                source_fresh["stale"] += 1
         except (TypeError, ValueError):
+            source_fresh["invalidTime"] += 1
             continue
+
+    # Keep per-source freshness diagnostics in the published snapshot and Actions log.
+    for source_key, values in freshness_by_source.items():
+        stat = stats_by_key.get(source_key)
+        if stat is None:
+            continue
+        ages = values.pop("ages")
+        stat.update({
+            "freshDevicesAtSnapshot": values["fresh"],
+            "freshSpeedDevicesAtSnapshot": values["freshSpeed"],
+            "staleDevicesAtSnapshot": values["stale"],
+            "missingCollectTime": values["missingTime"],
+            "invalidCollectTime": values["invalidTime"],
+            "oldestCollectAgeSeconds": round(max(ages), 1) if ages else None,
+            "newestCollectAgeSeconds": round(min(ages), 1) if ages else None
+        })
+        print(
+            f"[VD FRESHNESS] {stat.get('name')}: fresh={values['fresh']} "
+            f"freshSpeed={values['freshSpeed']} stale={values['stale']} "
+            f"missingTime={values['missingTime']} invalidTime={values['invalidTime']} "
+            f"oldestAgeSec={stat['oldestCollectAgeSeconds']}"
+        )
 
     payload = {
         "source": "交通部 TDX 路況資訊 v2 VD 官方靜態設備位置及 1 分鐘即時動態資料",
