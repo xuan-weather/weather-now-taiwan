@@ -364,6 +364,37 @@ def build_definition_index(groups):
             index[group_id] = definition
     return index
 
+def official_congestion_status(item, definition):
+    """Resolve published TDX congestion levels; do not infer official classes from speed."""
+    raw_level = item.get("CongestionLevel")
+    level_number = None
+    try:
+        level_number = int(float(raw_level))
+    except (TypeError, ValueError):
+        pass
+    level_name = ""
+    if isinstance(definition, dict):
+        for entry in definition.get("levels", []):
+            try:
+                entry_level = int(float(entry.get("Level")))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if level_number is not None and entry_level == level_number:
+                level_name = str(entry.get("LevelName") or "").strip()
+                break
+    candidate = level_name or str(raw_level or "").strip()
+    if "封閉" in candidate or level_number == -1:
+        status = "道路封閉"
+    elif "資料不足" in candidate or level_number == 0:
+        status = "資料不足"
+    elif candidate in ("順暢", "車多", "壅塞", "嚴重壅塞", "極度壅塞"):
+        status = candidate
+    elif level_number is not None and level_number > 0:
+        status = {1: "順暢", 2: "車多", 3: "車多", 4: "壅塞", 5: "嚴重壅塞", 6: "極度壅塞"}.get(level_number, "官方分級未識別")
+    else:
+        status = "官方分級未提供"
+    return status, level_number, level_name
+
 def build_segments(live_rows, shape_rows, region, label, source, section_rows=None, level_index=None):
     shape_by_id={}
     for item in shape_rows:
@@ -383,18 +414,25 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
         speed=speed_value(item)
         if not sid or not coords or speed is None:
             continue
+        definition = (level_index or {}).get(
+            f"{first_text(item,('AuthorityCode','_FeedAuthorityCode'),'')}:{str(item.get('CongestionLevelID','')).strip()}"
+        ) or (level_index or {}).get(str(item.get("CongestionLevelID", "")).strip())
+        status, level_number, level_name = official_congestion_status(item, definition)
         output.append({
             "id":f"{region}:{sid}",
+            "sectionId":sid,
             "name":first_text(item,("SectionName","RoadName","RoadNameZh","Name"),name_by_id.get(sid,f"{label} 路段 {sid}")),
             "region":region,
             "regionLabel":label,
             "speed":speed,
+            "travelTime":item.get("TravelTime"),
             "congestionLevel":item.get("CongestionLevel"),
             "congestionLevelId":item.get("CongestionLevelID"),
+            "congestionLevelNumber":level_number,
+            "congestionLevelName":level_name,
+            "congestionStatus":status,
             "authorityCode":first_text(item,("AuthorityCode","_FeedAuthorityCode"),""),
-            "congestionDefinition":(level_index or {}).get(
-                f"{first_text(item,('AuthorityCode','_FeedAuthorityCode'),'')}:{str(item.get('CongestionLevelID','')).strip()}"
-            ) or (level_index or {}).get(str(item.get("CongestionLevelID", "")).strip()),
+            "congestionDefinition":definition,
             "coords":coords,
             "sourceLabel":source,
             "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime","_FeedUpdateTime"),"")
@@ -538,107 +576,67 @@ def fetch_event_records(bearer,authority):
     return output
 
 def fetch_supplemental_layers(bearer):
-    cache=load_supplemental_cache()
-    now=datetime.now(TW).isoformat(timespec="seconds")
-    cameras={}
-    parking={}
-    incidents=[]
-    source_status=[]
+    """Fetch official national/provincial CCTV and road events; cache static CCTV for 7 days."""
+    cache = load_supplemental_cache()
+    now = datetime.now(TW).isoformat(timespec="seconds")
+    cameras = {}
+    incidents = []
+    source_status = []
 
-    # CCTV inventory is static metadata; refresh weekly. Live image URLs remain source links.
-    for path in ("Road/Traffic/CCTV/Highway","Road/Traffic/CCTV/Freeway"):
+    # National freeway and provincial-road CCTV only. Per-city CCTV and parking endpoints
+    # are intentionally excluded from this five-minute job to avoid API throttling/overruns.
+    for path in ("Road/Traffic/CCTV/Highway", "Road/Traffic/CCTV/Freeway"):
         try:
-            for item in cached_static_rows(path,bearer,cache):
-                point=coordinates(item)
-                if not point: continue
-                cam_id=field_value(item,"CCTVID","CameraID","DeviceID","ID")
-                stream=field_value(item,"VideoStreamURL","VideoURL","StreamURL")
-                image=field_value(item,"VideoImageURL","ImageURL","SnapshotURL")
-                name=field_value(item,"RoadName","LocationDescription","CCTVName","Description") or f"{path.split('/')[-1]} CCTV"
-                key=str(cam_id or f"{path}-{point[0]}-{point[1]}")
-                cameras[key]={"id":key,"name":str(name),"direction":str(field_value(item,"Direction","RoadDirection") or ""),
-                              "lat":point[0],"lng":point[1],"streamUrl":stream,"imageUrl":image,
-                              "source":"TDX","updatedAt":field_value(item,"UpdateTime","SrcUpdateTime")}
-            source_status.append({"source":path,"ok":True,"count":len(cameras)})
-        except Exception as exc:
-            source_status.append({"source":path,"ok":False,"error":str(exc)[:180]})
-            print(f"[LAYER WARN] {path}: {exc}",file=sys.stderr)
-
-    for city,label in SUPPLEMENTAL_CITIES:
-        path=f"Road/Traffic/CCTV/City/{city}"
-        try:
-            for item in cached_static_rows(path,bearer,cache):
-                point=coordinates(item)
-                if not point: continue
-                cam_id=field_value(item,"CCTVID","CameraID","DeviceID","ID")
-                key=str(cam_id or f"{city}-{point[0]}-{point[1]}")
-                cameras[key]={"id":key,"name":str(field_value(item,"RoadName","LocationDescription","CCTVName","Description") or f"{label}道路監視器"),
-                              "direction":str(field_value(item,"Direction","RoadDirection") or ""),
-                              "lat":point[0],"lng":point[1],
-                              "streamUrl":field_value(item,"VideoStreamURL","VideoURL","StreamURL"),
-                              "imageUrl":field_value(item,"VideoImageURL","ImageURL","SnapshotURL"),
-                              "source":"TDX","updatedAt":field_value(item,"UpdateTime","SrcUpdateTime"),"region":label}
-            source_status.append({"source":f"CCTV {label}","ok":True})
-        except Exception as exc:
-            source_status.append({"source":f"CCTV {label}","ok":False,"error":str(exc)[:180]})
-            print(f"[LAYER WARN] CCTV {label}: {exc}",file=sys.stderr)
-
-    # Parking availability is refreshed each run; lot coordinates/name are joined by ParkingID.
-    for city,label in SUPPLEMENTAL_CITIES:
-        try:
-            lots=cached_static_rows(f"Parking/OffStreet/ParkingLot/City/{city}",bearer,cache, fetcher=rows_v1)
-            availability=rows_v1(f"Parking/OffStreet/ParkingAvailability/City/{city}",bearer)
-            lot_by_id={}
-            for lot in lots:
-                pid=str(field_value(lot,"ParkingID","ParkingId","ID") or "")
-                point=coordinates(lot)
-                if pid and point: lot_by_id[pid]=(lot,point)
-            mapped=0
-            for avail in availability:
-                pid=str(field_value(avail,"ParkingID","ParkingId","ID") or "")
-                if pid not in lot_by_id: continue
-                lot,point=lot_by_id[pid]
-                available=field_value(avail,"AvailableCar","AvailableSmallCar","AvailableCarCount","AvailableNumber")
-                total=field_value(lot,"TotalCar","TotalSpaces","TotalParkingSpaces")
-                try:
-                    available=int(float(available))
-                    if available < 0: continue
-                except (TypeError,ValueError):
+            records = cached_static_rows(path, bearer, cache)
+            count = 0
+            for item in records:
+                point = coordinates(item)
+                if not point:
                     continue
-                try: total=int(float(total)) if total is not None else None
-                except (TypeError,ValueError): total=None
-                parking[pid]={"id":pid,"name":str(field_value(lot,"ParkingName","Name") or f"{label}停車場"),
-                              "available":available,"total":total,"rate":str(field_value(lot,"FareDescription","ChargeDescription","ParkingRate") or ""),
-                              "lat":point[0],"lng":point[1],"region":label,
-                              "updatedAt":field_value(avail,"UpdateTime","SrcUpdateTime","DataCollectTime"),
-                              "source":"TDX"}
-                mapped+=1
-            source_status.append({"source":f"Parking {label}","ok":True,"count":mapped})
-            print(f"[LAYER] Parking {label}: lots={len(lots)} availability={len(availability)} mapped={mapped}")
+                cam_id = field_value(item, "CCTVID", "CameraID", "DeviceID", "ID")
+                key = str(cam_id or f"{path}-{point[0]}-{point[1]}")
+                cameras[key] = {
+                    "id": key,
+                    "name": str(field_value(item, "RoadName", "LocationDescription", "CCTVName", "Description") or f"{path.split('/')[-1]} CCTV"),
+                    "direction": str(field_value(item, "Direction", "RoadDirection") or ""),
+                    "lat": point[0], "lng": point[1],
+                    "streamUrl": field_value(item, "VideoStreamURL", "VideoURL", "StreamURL"),
+                    "imageUrl": field_value(item, "VideoImageURL", "ImageURL", "SnapshotURL"),
+                    "source": "TDX", "updatedAt": field_value(item, "UpdateTime", "SrcUpdateTime"),
+                    "network": path.rsplit("/", 1)[-1]
+                }
+                count += 1
+            source_status.append({"source": path, "ok": True, "count": count})
+            print(f"[LAYER] {path}: {count} cameras")
         except Exception as exc:
-            source_status.append({"source":f"Parking {label}","ok":False,"error":str(exc)[:180]})
-            print(f"[LAYER WARN] Parking {label}: {exc}",file=sys.stderr)
+            source_status.append({"source": path, "ok": False, "error": str(exc)[:180]})
+            print(f"[LAYER WARN] {path}: {exc}", file=sys.stderr)
 
-    # Road-event live endpoints are documented for national highways; do not invent city events.
-    for authority in ("Freeway","Highway"):
+    # RoadEvent v1 supplies official freeway and provincial-road events.
+    for authority in ("Freeway", "Highway"):
         try:
-            found=fetch_event_records(bearer,authority)
+            found = fetch_event_records(bearer, authority)
             incidents.extend(found)
-            source_status.append({"source":f"RoadEvent {authority}","ok":True,"count":len(found)})
+            source_status.append({"source": f"RoadEvent {authority}", "ok": True, "count": len(found)})
             print(f"[LAYER] RoadEvent {authority}: {len(found)}")
         except Exception as exc:
-            source_status.append({"source":f"RoadEvent {authority}","ok":False,"error":str(exc)[:180]})
-            print(f"[LAYER WARN] RoadEvent {authority}: {exc}",file=sys.stderr)
+            source_status.append({"source": f"RoadEvent {authority}", "ok": False, "error": str(exc)[:180]})
+            print(f"[LAYER WARN] RoadEvent {authority}: {exc}", file=sys.stderr)
 
-    cache["generatedAt"]=now
+    cache["generatedAt"] = now
     save_supplemental_cache(cache)
-    payload={"source":"交通部 TDX 官方道路事件、CCTV 與停車資訊","generatedAt":now,
-             "incidents":incidents,"cctv":list(cameras.values()),"parking":list(parking.values()),
-             "sources":source_status}
-    os.makedirs("data",exist_ok=True)
-    with open(SUPPLEMENTAL_PATH,"w",encoding="utf-8") as f:
-        json.dump(payload,f,ensure_ascii=False,separators=(",",":"))
-    print(f"[LAYER] saved incidents={len(incidents)} CCTV={len(cameras)} parking={len(parking)}")
+    payload = {
+        "source": "交通部 TDX 官方國道／省道道路事件與 CCTV",
+        "generatedAt": now,
+        "incidents": incidents,
+        "cctv": list(cameras.values()),
+        "parking": [],
+        "sources": source_status
+    }
+    os.makedirs("data", exist_ok=True)
+    with open(SUPPLEMENTAL_PATH, "w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False, separators=(",", ":"))
+    print(f"[LAYER] saved incidents={len(incidents)} CCTV={len(cameras)}")
 
 def main():
     bearer=token()
@@ -655,8 +653,8 @@ def main():
             level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/City/{city_code}", bearer, level_cache)
             segments = build_segments(live, shapes, region, label, "TDX 縣市即時路況", level_index=build_definition_index(level_groups))
             all_segments.extend(segments)
-            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
-            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)}")
+            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"unmappedRecords":max(0,len(live)-len(segments)),"mappingRate":round(len(segments)/len(live)*100,1) if live else 0,"ok":True})
+            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)} unmapped={max(0,len(live)-len(segments))}")
         except Exception as exc:
             stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
@@ -669,8 +667,8 @@ def main():
             level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/{category}", bearer, level_cache)
             segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況", level_index=build_definition_index(level_groups))
             all_segments.extend(segments)
-            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"ok":True})
-            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)}")
+            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"unmappedRecords":max(0,len(live)-len(segments)),"mappingRate":round(len(segments)/len(live)*100,1) if live else 0,"ok":True})
+            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)} unmapped={max(0,len(live)-len(segments))}")
         except Exception as exc:
             stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
@@ -678,6 +676,7 @@ def main():
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
     save_shape_cache(shape_cache)
     save_congestion_cache(level_cache)
+    fetch_supplemental_layers(bearer)
     generated_at = datetime.now(TW)
     # 以各路段來源提供的觀測時間計算最新官方資料時間；
     # generatedAt 則保留為本次 JSON 快照產生時間，兩者不可混用。
@@ -699,6 +698,7 @@ def main():
         "generatedAt":generated_at.isoformat(timespec="seconds"),
         "officialDataAt":official_data_at,
         "totalSegments":len(all_segments),
+        "officialClassifiedSegments":sum(1 for item in all_segments if item.get("congestionStatus") not in ("官方分級未提供", "官方分級未識別")),
         "segments":all_segments,
         "sources":stats
     }
