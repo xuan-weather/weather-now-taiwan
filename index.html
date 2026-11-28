@@ -904,8 +904,10 @@
             </div>
             <div class="text-xs font-bold text-white mb-1 leading-snug">${inc.title}</div>
             <p class="text-[11px] text-slate-300 leading-relaxed mb-2">${inc.desc}</p>
+            ${inc.locationPrecision === 'milepost-estimate' ? '<div class="text-[10px] font-semibold text-amber-200 bg-amber-500/10 border border-amber-500/25 rounded-lg px-2 py-1 mb-2">📍 依高公局百公尺里程樁推估位置，非即時事故座標</div>' : ''}
+            ${inc.coordinateSource ? '<div class="text-[10px] text-slate-400 mb-1">定位來源：${inc.coordinateSource}</div>' : ''}
             <div class="text-[10px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-2 py-1">
-              影響範圍：${inc.lane}
+              影響範圍：${inc.lane || '依官方通報內容'}
             </div>
           </div>
         `;
