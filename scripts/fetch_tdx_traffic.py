@@ -158,7 +158,7 @@ def extract_items(payload):
         error = payload.get("error") or {}
         raise RuntimeError(f"TDX returned {error.get('message') or error or 'success=false'}")
     # TDX 路況資料常以 LiveTrafficList/LiveTraffic、SectionShapeList/SectionShapes 包裝。
-    preferred = ("LiveTraffic", "LiveEvent", "RoadEvent", "CCTV", "ParkingAvailability", "ParkingLot", "SectionShape", "LiveTraffics", "LiveEvents", "RoadEventList", "LiveEventList", "CCTVList", "ParkingAvailabilityList", "ParkingLotList", "SectionShapes", "value", "data", "Data")
+    preferred = ("VDLive", "VDLives", "VDLiveList", "LiveTraffic", "LiveEvent", "RoadEvent", "CCTV", "ParkingAvailability", "ParkingLot", "SectionShape", "LiveTraffics", "LiveEvents", "RoadEventList", "LiveEventList", "CCTVList", "ParkingAvailabilityList", "ParkingLotList", "SectionShapes", "value", "data", "Data")
     for key in preferred:
         if key in payload:
             found = extract_items(payload[key])
@@ -1006,7 +1006,7 @@ def fetch_vd_layer(bearer, static_cache):
                 if not vd_id or not point:
                     continue
                 links = collection_items(item.get("DetectionLinks"), "DetectionLink")
-                devices[key_prefix + vd_id] = {
+                devices[key_prefix + vd_id.upper()] = {
                     "id": vd_id,
                     "sourceType": source_type,
                     "sourceCode": code,
@@ -1065,19 +1065,26 @@ def fetch_vd_layer(bearer, static_cache):
             live_rows = rows(live_path, bearer)
             stat["liveRecords"] = len(live_rows)
             matched = 0
+            if live_rows:
+                sample = live_rows[0] if isinstance(live_rows[0], dict) else {}
+                stat["liveSampleKeys"] = sorted(str(key) for key in sample.keys())[:40]
+                stat["liveSampleVDID"] = str(sample.get("VDID") or "")[:80]
+                stat["liveSampleStatus"] = sample.get("Status", sample.get("status"))
+                stat["liveSampleDataCollectTime"] = sample.get("DataCollectTime", sample.get("dataCollectTime"))
             for live in live_rows:
                 if not isinstance(live, dict):
                     continue
                 vd_id = str(live.get("VDID") or "").strip()
-                device = devices.get(key_prefix + vd_id)
+                device = devices.get(key_prefix + vd_id.upper())
                 if not vd_id or device is None:
                     continue
                 values = summarize_vd_live(live)
                 device.update(values)
                 matched += 1
             stat["matchedLive"] = matched
+            stat["unmatchedLive"] = max(0, len(live_rows) - matched)
             stat["liveOK"] = True
-            print(f"[VD LIVE] {label}: live={len(live_rows)} matched={matched}")
+            print(f"[VD LIVE] {label}: live={len(live_rows)} matched={matched} unmatched={stat['unmatchedLive']} sampleVDID={stat.get('liveSampleVDID', '')}")
         except Exception as exc:
             stat["liveError"] = str(exc)[:220]
             print(f"[VD LIVE WARN] {label}: {exc}", file=sys.stderr)
