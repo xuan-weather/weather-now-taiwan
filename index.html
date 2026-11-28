@@ -871,6 +871,9 @@
       if (/故障車|車輛故障|拋錨|故障車輛/.test(text)) return 'breakdown';
       if (/散落物|掉落物|障礙物|異物|輪胎皮|鐵條/.test(text)) return 'obstruction';
       if (/壅塞|阻塞|車多|車流湧現/.test(text)) return 'congestion';
+      // Do not trust an old broad "accident" label when its description only
+      // mentions hypothetical/emergency incidents in a general control notice.
+      if (inc.type === 'accident') return /管制|開放路肩|封閉|儀控/.test(text) ? 'traffic_control' : 'other';
       return inc.type || 'other';
     }
 
