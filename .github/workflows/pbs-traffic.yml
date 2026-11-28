@@ -1,0 +1,49 @@
+name: Update PBS Live Traffic
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/fetch_pbs_traffic.py"
+      - ".github/workflows/pbs-traffic.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pbs-live-traffic
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependency
+        run: python -m pip install requests
+      - name: Fetch official PBS traffic
+        run: python scripts/fetch_pbs_traffic.py
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/pbs-traffic.json
+          if git diff --cached --quiet; then
+            echo "No PBS traffic changes"
+            exit 0
+          fi
+          git commit -m "Update PBS live traffic snapshot"
+          git pull --rebase origin main
+          git push origin HEAD:main
