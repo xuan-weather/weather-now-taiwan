@@ -1066,7 +1066,9 @@
             type, title: roadText.trim(), desc: String(row.comment || ''),
             time: String(row.happendate || '') + ' ' + String(row.happentime || ''),
             lane: '', road: roadText, lat, lng, authority: 'Freeway',
-            source: 'PBS', sourceName: sourceText || '警廣／高公局通報'
+            source: 'PBS', sourceName: sourceText || '警廣／高公局通報',
+            locationPrecision: row.locationPrecision || (row.coordinateSource === 'PBS official coordinates' ? 'official' : ''),
+            coordinateSource: row.coordinateSource || ''
           });
         });
         if (markers.length) {
