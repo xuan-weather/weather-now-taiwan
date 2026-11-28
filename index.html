@@ -208,21 +208,23 @@
       </div>
     </div>
 
-    <!-- 左上角快速功能選單 -->
-    <div id="quick-menu-panel" class="hidden glass-panel rounded-2xl p-2 w-52 pointer-events-auto">
-      <div class="px-2 py-1.5 text-[11px] font-semibold tracking-wide text-slate-400">快速功能</div>
-      <button type="button" onclick="flyToRegion('taiwan');toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
-        <span class="text-emerald-400">⌖</span><span>全台路網總覽</span>
-      </button>
-      <button type="button" onclick="locateUser();toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
-        <span class="text-sky-400">◎</span><span>定位目前位置</span>
-      </button>
-      <button type="button" onclick="toggleLayerPanel(true);toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
-        <span class="text-indigo-300">▦</span><span>即時資訊圖層</span>
-      </button>
-      <button type="button" onclick="toggleReportMode();toggleQuickMenu(false)" class="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs hover:bg-white/10 transition">
-        <span class="text-amber-400">⚑</span><span>通報新路況</span>
-      </button>
+    <!-- 網站頁面切換選單 -->
+    <div id="quick-menu-panel" class="hidden glass-panel rounded-2xl p-2 w-60 pointer-events-auto">
+      <div class="px-2 py-1.5 text-[11px] font-semibold tracking-wide text-slate-400">網站頁面</div>
+      <div class="w-full flex items-center justify-between gap-2 rounded-xl bg-sky-500/15 border border-sky-400/20 px-3 py-3 text-xs text-white">
+        <span class="flex items-center gap-3 min-w-0">
+          <span class="text-sky-300">▦</span>
+          <span class="font-semibold">即時路況地圖</span>
+        </span>
+        <span class="shrink-0 rounded-full bg-sky-500/25 px-2 py-1 text-[10px] font-semibold text-sky-200">目前頁面</span>
+      </div>
+      <a href="http://rtr.pbs.gov.tw/realtime/RoadAll.php" target="_blank" rel="noopener noreferrer"
+        onclick="toggleQuickMenu(false)"
+        class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-xs text-slate-100 hover:bg-white/10 transition">
+        <span class="text-amber-300">📻</span>
+        <span class="font-medium">警廣即時路況</span>
+        <span class="ml-auto text-[10px] text-slate-400">↗</span>
+      </a>
     </div>
 
     <!-- 搜尋建議下拉清單 -->
