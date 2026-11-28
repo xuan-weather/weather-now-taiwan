@@ -34,13 +34,21 @@ def normalize_road_text(value):
 def parse_milepost_context(text):
     text = normalize_road_text(text)
     road_match = re.search(r"國道\s*(\d{1,2})(?:號)?", text)
-    km_match = re.search(r"(\d{1,3})\s*K(?:\s*\+\s*(\d{1,3}))?", text, re.I)
+    # PBS commonly reports decimal kilometre values (e.g. 337.8km),
+    # while other feeds use K+metres (e.g. 337K+800).
+    km_match = re.search(r"(\d{1,3})\s*K\s*\+\s*(\d{1,3})", text, re.I)
+    if km_match:
+        km = int(km_match.group(1)) + int(km_match.group(2)) / 1000
+    else:
+        km_match = re.search(r"(\d{1,3})(?:\.(\d{1,3}))?\s*(?:KM|K|公里)", text, re.I)
+        if not road_match or not km_match:
+            return None
+        km = int(km_match.group(1)) + float("0." + (km_match.group(2) or "0"))
     if not road_match or not km_match:
         return None
     direction = "N" if re.search(r"北上|北向|北行", text) else ("S" if re.search(r"南下|南向|南行", text) else "")
     if not direction:
         return None
-    km = int(km_match.group(1)) + int(km_match.group(2) or 0) / 1000
     road_code = road_match.group(1) + ("-high" if re.search(r"高架|汐止楊梅", text) else "")
     return road_code, direction, km
 
