@@ -846,60 +846,66 @@ def summarize_vd_live(live):
     lane_count = 0
     volume_records = 0
     used_top_level_speed = False
+    raw_speed_values = []
     vehicle_volumes = {"M": 0, "S": 0, "L": 0, "T": 0}
+    lane_speed_keys = ("Speed", "LaneSpeed", "AverageSpeed", "AvgSpeed", "speed", "laneSpeed")
+    vehicle_speed_keys = ("Speed", "VehicleSpeed", "AverageSpeed", "AvgSpeed", "speed", "vehicleSpeed")
     for link in collection_items(live.get("LinkFlows"), "LinkFlow"):
         link_id = str(link.get("LinkID") or "").strip()
         if link_id and link_id not in link_ids:
             link_ids.append(link_id)
         for lane in collection_items(link.get("Lanes"), "Lane"):
             lane_count += 1
-            raw_lane_speed = lane.get("Speed")
-            if raw_lane_speed is None:
-                raw_lane_speed = lane.get("LaneSpeed", lane.get("speed"))
+            raw_lane_speed = field_value(lane, *lane_speed_keys)
+            if raw_lane_speed is not None:
+                raw_speed_values.append(raw_lane_speed)
             speed = number_or_none(raw_lane_speed, 0, 200)
-            occupancy = number_or_none(lane.get("Occupancy", lane.get("occupancy")), 0, 100)
+            occupancy = number_or_none(field_value(lane, "Occupancy", "occupancy"), 0, 100)
             if speed is not None:
                 lane_speeds.append(speed)
             if occupancy is not None:
                 occupancies.append(occupancy)
             for vehicle in collection_items(lane.get("Vehicles"), "Vehicle"):
                 vehicle_type = str(vehicle.get("VehicleType") or vehicle.get("vehicleType") or "").upper()
-                volume = number_or_none(vehicle.get("Volume", vehicle.get("volume")), 0, 1000000)
+                volume = number_or_none(field_value(vehicle, "Volume", "volume"), 0, 1000000)
                 if vehicle_type in vehicle_volumes and volume is not None:
                     vehicle_volumes[vehicle_type] += int(volume)
                     volume_records += 1
-                raw_vehicle_speed = vehicle.get("Speed")
-                if raw_vehicle_speed is None:
-                    raw_vehicle_speed = vehicle.get("VehicleSpeed", vehicle.get("speed"))
+                raw_vehicle_speed = field_value(vehicle, *vehicle_speed_keys)
+                if raw_vehicle_speed is not None:
+                    raw_speed_values.append(raw_vehicle_speed)
                 vehicle_speed = number_or_none(raw_vehicle_speed, 0, 200)
                 if vehicle_speed is not None:
                     weight = volume if volume is not None and volume > 0 else 1
                     vehicle_speeds.append((vehicle_speed, weight))
 
-    # 兼容部分業管單位直接在 VDLive 層提供標準欄位的回應；
-    # 僅讀取官方原始值，不以車流量或佔有率推算車速。
-    if not lane_speeds:
-        top_speed = number_or_none(field_value(live, "Speed", "LaneSpeed", "AverageSpeed"), 0, 200)
+    # TDX v2 部分資料以 VDID + LinkID + LaneID 的扁平車道欄位回傳，
+    # 另一些端點則使用 LinkFlows/Lanes 巢狀結構；兩種格式都讀取官方 Speed。
+    if not lane_speeds and not vehicle_speeds:
+        top_raw_speed = field_value(live, *lane_speed_keys)
+        if top_raw_speed is not None:
+            raw_speed_values.append(top_raw_speed)
+        top_speed = number_or_none(top_raw_speed, 0, 200)
         if top_speed is not None:
             lane_speeds.append(top_speed)
             used_top_level_speed = True
     if not occupancies:
-        top_occupancy = number_or_none(field_value(live, "Occupancy", "LaneOccupancy"), 0, 100)
+        top_occupancy = number_or_none(field_value(live, "Occupancy", "LaneOccupancy", "occupancy"), 0, 100)
         if top_occupancy is not None:
             occupancies.append(top_occupancy)
     if volume_records == 0:
         for code, keys in {
-            "M": ("Volume_M", "VolumeM", "MotorcycleVolume"),
-            "S": ("Volume_S", "VolumeS", "SmallVehicleVolume"),
-            "L": ("Volume_L", "VolumeL", "LargeVehicleVolume"),
-            "T": ("Volume_T", "VolumeT", "TrailerVolume")
+            "M": ("Volume_M", "VolumeM", "MotorcycleVolume", "volume_M"),
+            "S": ("Volume_S", "VolumeS", "SmallVehicleVolume", "volume_S"),
+            "L": ("Volume_L", "VolumeL", "LargeVehicleVolume", "volume_L"),
+            "T": ("Volume_T", "VolumeT", "TrailerVolume", "volume_T")
         }.items():
             value = number_or_none(field_value(live, *keys), 0, 1000000)
             if value is not None:
                 vehicle_volumes[code] = int(value)
                 volume_records += 1
 
-    raw_status = live.get("Status")
+    raw_status = field_value(live, "Status", "status")
     try:
         status = int(raw_status) if raw_status is not None and str(raw_status).strip() != "" else None
     except (TypeError, ValueError):
@@ -914,23 +920,37 @@ def summarize_vd_live(live):
     else:
         speed = None
         speed_source = "unavailable"
-    # TDX 部分端點會在資料集層提供 SrcUpdateTime，而單筆 VDLive 未必帶 DataCollectTime。
-    # 僅在設備本身沒有時間戳時才回退到來源時間，避免用整批更新時間覆蓋較舊的設備觀測時間。
-    data_time = (live.get("DataCollectTime") or live.get("UpdateTime")
-                 or live.get("SrcUpdateTime") or live.get("_FeedUpdateTime")
-                 or live.get("_FeedSrcUpdateTime") or "")
+    # DataCollectTime 才是設備實際觀測時間；資料集 UpdateTime 僅作來源更新時間，
+    # 不可拿來替代觀測時間或讓過期設備看起來像即時資料。
+    data_time = field_value(live, "DataCollectTime", "dataCollectTime", "data_collect_time") or ""
+    source_update_time = field_value(live, "SrcUpdateTime", "UpdateTime", "_FeedUpdateTime", "_FeedSrcUpdateTime") or ""
+    if not source_update_time:
+        source_update_time = live.get("_FeedUpdateTime") or live.get("_FeedSrcUpdateTime") or ""
+    speed_state = "valid" if speed is not None else ("invalid" if raw_speed_values else "missing")
     return {
         "linkIds": link_ids,
-        "laneCount": lane_count,
+        "laneCount": lane_count or (1 if any(k in live for k in ("LaneID", "laneId", "laneID")) else 0),
         "speed": speed,
         "speedSource": speed_source,
         "validLaneSpeedCount": len(lane_speeds),
         "validVehicleSpeedCount": len(vehicle_speeds),
+        "speedDiagnostics": {
+            "state": speed_state,
+            "rawValues": [str(v)[:32] for v in raw_speed_values[:8]],
+            "rawValueCount": len(raw_speed_values),
+            "speedFieldNames": [k for k in lane_speed_keys if k in live] + [
+                "nested-lane" if lane_speeds and not used_top_level_speed else ""
+            ],
+            "linkFlowCount": len(collection_items(live.get("LinkFlows"), "LinkFlow")),
+            "nestedLaneCount": lane_count,
+            "flatLaneId": field_value(live, "LaneID", "laneId", "laneID")
+        },
         "occupancy": round(sum(occupancies) / len(occupancies), 1) if occupancies else None,
         "volumePerMinute": sum(vehicle_volumes.values()) if volume_records else None,
         "vehicleVolumes": vehicle_volumes,
         "status": status,
         "dataCollectTime": data_time,
+        "sourceUpdateTime": source_update_time,
         "speedAvailable": speed is not None,
         "flowAvailable": volume_records > 0,
         "occupancyAvailable": bool(occupancies)
@@ -1043,6 +1063,7 @@ def fetch_vd_layer(bearer, static_cache):
     for device in devices.values():
         status_key = str(device.get("status")) if device.get("status") is not None else "unknown"
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
+        # 只用設備 DataCollectTime 判斷新鮮度；來源檔案 UpdateTime 不代表設備觀測時間。
         if not device.get("dataCollectTime"):
             continue
         try:
