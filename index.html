@@ -282,20 +282,37 @@ function vdDataAgeMs(device){
 const d=parseDate(device.dataCollectTime);
 return d?Date.now()-d.getTime():Infinity;
 }
-function vdIsFresh(device){
+function vdFreshnessState(device){
+const status=device.status===null||device.status===undefined||device.status===''?null:Number(device.status);
 const age=vdDataAgeMs(device);
-// 以官方快照宣告的 5 分鐘新鮮度門檻判定；不以快照產生時間冒充設備觀測時間。
+if(status!==null&&status!==0)return 'abnormal';
+if(!Number.isFinite(age))return 'missing';
+if(age < -2*60*1000)return 'invalid';
+if(status===null)return 'unknown';
 const freshnessWindowSeconds=Number(vdMeta.freshnessWindowSeconds)||300;
-return Number(device.status)===0&&age>=-2*60*1000&&age<=freshnessWindowSeconds*1000;
+if(age<=freshnessWindowSeconds*1000)return 'live';
+if(age<=15*60*1000)return 'delayed';
+return 'expired';
 }
+function vdIsFresh(device){return vdFreshnessState(device)==='live';}
 function vdIsDisplayable(device){
-const age=vdDataAgeMs(device);
-// 15 分鐘內保留官方原始資料並標示延遲；超過即不列入可用即時圖層。
-return Number(device.status)===0&&age>=-2*60*1000&&age<=15*60*1000;
+const state=vdFreshnessState(device);
+return state==='live'||state==='delayed';
 }
 function vdHasValidSpeed(device){
 const speed=Number(device.speed);
 return device.speed!==null&&device.speed!==undefined&&device.speed!==''&&Number.isFinite(speed)&&speed>=0&&speed<=200;
+}
+function vdHasValidFlow(device){
+const flow=Number(device.volumePerMinute);
+return device.volumePerMinute!==null&&device.volumePerMinute!==undefined&&device.volumePerMinute!==''&&Number.isFinite(flow)&&flow>=0;
+}
+function vdHasPositiveFlow(device){return vdHasValidFlow(device)&&Number(device.volumePerMinute)>0;}
+function vdDisplayPriority(device){
+const state=vdFreshnessState(device);
+if(state==='live')return vdHasPositiveFlow(device)?0:vdHasValidFlow(device)?1:vdHasValidSpeed(device)?2:3;
+if(state==='delayed')return vdHasPositiveFlow(device)?4:vdHasValidFlow(device)?5:vdHasValidSpeed(device)?6:7;
+return 8;
 }
 async function refreshVDData(){
 try{
@@ -314,11 +331,18 @@ function updateVDCountLabel(){
 const count=document.getElementById('vd-count-label');
 if(!count)return;
 if(!vdDevices.length){count.textContent='官方 VD 點位資料尚未載入';return;}
-const freshCount=vdDevices.filter(vdIsFresh).length;
-const displayableCount=vdDevices.filter(vdIsDisplayable).length;
-const delayedCount=Math.max(0,displayableCount-freshCount);
-const speedCount=vdDevices.filter(d=>vdIsDisplayable(d)&&vdHasValidSpeed(d)).length;
-const flowCount=vdDevices.filter(d=>vdIsDisplayable(d)&&d.volumePerMinute!==null&&d.volumePerMinute!==undefined&&d.volumePerMinute!=='').length;
+const states=vdDevices.map(vdFreshnessState);
+const freshCount=states.filter(s=>s==='live').length;
+const delayedCount=states.filter(s=>s==='delayed').length;
+const expiredCount=states.filter(s=>s==='expired').length;
+const missingCount=states.filter(s=>s==='missing').length;
+const abnormalCount=states.filter(s=>s==='abnormal').length;
+const invalidCount=states.filter(s=>s==='invalid').length;
+const unknownCount=states.filter(s=>s==='unknown').length;
+const freshSpeed=vdDevices.filter(d=>vdFreshnessState(d)==='live'&&vdHasValidSpeed(d)).length;
+const freshFlow=vdDevices.filter(d=>vdFreshnessState(d)==='live'&&vdHasPositiveFlow(d)).length;
+const delayedSpeed=vdDevices.filter(d=>vdFreshnessState(d)==='delayed'&&vdHasValidSpeed(d)).length;
+const delayedFlow=vdDevices.filter(d=>vdFreshnessState(d)==='delayed'&&vdHasPositiveFlow(d)).length;
 const occupancyCount=vdDevices.filter(d=>vdIsDisplayable(d)&&d.occupancy!==null&&d.occupancy!==undefined&&d.occupancy!=='').length;
 const snapshotTime=vdMeta.generatedAt?formatTime(vdMeta.generatedAt):'快照時間未提供';
 const snapshotDate=parseDate(vdMeta.generatedAt);
@@ -326,7 +350,7 @@ const snapshotAgeMinutes=snapshotDate?Math.max(0,Math.floor((Date.now()-snapshot
 const snapshotAgeText=snapshotAgeMinutes===null?'快照時間未知':snapshotAgeMinutes===0?'快照剛更新':'快照 '+snapshotAgeMinutes+' 分鐘前';
 const snapshotLive=Number.isFinite(Number(vdMeta.liveDevices))?Number(vdMeta.liveDevices):'—';
 const snapshotSpeed=Number.isFinite(Number(vdMeta.liveSpeedDevices))?Number(vdMeta.liveSpeedDevices):'—';
-count.textContent=vdDevices.length+' 個官方點位・目前即時 '+freshCount+'／延遲 '+delayedCount+'／可用車速 '+speedCount+'／流量 '+flowCount+'／佔有率 '+occupancyCount+'・快照當時即時 '+snapshotLive+'／車速 '+snapshotSpeed+'（'+snapshotAgeText+'）・更新 '+snapshotTime;
+count.textContent=vdDevices.length+' 官方點位｜即時 '+freshCount+'（車速 '+freshSpeed+'・有流量 '+freshFlow+'）｜延遲 '+delayedCount+'（車速 '+delayedSpeed+'・有流量 '+delayedFlow+'）｜逾時 '+expiredCount+'｜無資料 '+missingCount+'｜異常 '+abnormalCount+'｜時間異常 '+invalidCount+'｜狀態未確認 '+unknownCount+'｜快照 '+snapshotLive+'／車速 '+snapshotSpeed+'（'+snapshotAgeText+'）・更新 '+snapshotTime;
 }
 function renderVDLayer(){
 layers.vd.clearLayers();
@@ -336,16 +360,22 @@ if(!toggle||!toggle.checked||map.getZoom()<11)return;
 const bounds=map.getBounds();
 const visible=vdDevices.filter(d=>d.lat>=bounds.getSouth()&&d.lat<=bounds.getNorth()&&d.lng>=bounds.getWest()&&d.lng<=bounds.getEast());
 const limit=map.getZoom()>=13?900:450;
+// 優先顯示官方最新且有實際車流的設備；不改動座標，只調整可視範圍內的繪製順序。
+visible.sort((a,b)=>vdDisplayPriority(a)-vdDisplayPriority(b)||
+(Number(b.volumePerMinute)||0)-(Number(a.volumePerMinute)||0)||
+(Number(b.speed)||0)-(Number(a.speed)||0));
 visible.slice(0,limit).forEach(device=>{
 const fresh=vdIsFresh(device),displayable=vdIsDisplayable(device),speed=Number(device.speed),speedValid=vdHasValidSpeed(device);
 const color=!displayable?'#94a3b8':!speedValid?'#64748b':speed>=60?'#10b981':speed>=40?'#f59e0b':speed>=20?'#f97316':'#ef4444';
 const marker=L.circleMarker([device.lat,device.lng],{renderer:map.getRenderer(map),radius:map.getZoom()>=13?6:5,color:'#0f172a',weight:1.2,fillColor:color,fillOpacity:fresh ? 0.95 : displayable ? 0.65 : 0.35}).addTo(layers.vd);
 const volumes=device.vehicleVolumes||{};
 const typeNames={M:'機車',S:'小型車',L:'大型車',T:'聯結車'};
-const vehicleText=device.dataCollectTime?Object.entries(typeNames).map(([key,label])=>label+' '+(Number(volumes[key])||0)).join('・'):'車種流量：未取得';
+const vehicleText=device.dataCollectTime?Object.entries(typeNames).map(([key,label])=>label+' '+(Number(volumes[key])||0)).join('・')+(fresh?'':'（非即時參考）'):'車種流量：未取得';
 const collectedDate=parseDate(device.dataCollectTime);
 const dataAgeMinutes=collectedDate?Math.max(0,Math.floor((Date.now()-collectedDate.getTime())/60000)):null;
-const freshnessLabel=fresh?'即時':displayable?'延遲 '+dataAgeMinutes+' 分鐘':dataAgeMinutes!==null?'資料已逾時':'未取得動態資料';
+const state=vdFreshnessState(device);
+const freshnessLabels={live:'即時',delayed:'延遲 '+dataAgeMinutes+' 分鐘',expired:'已逾時',missing:'無觀測時間',abnormal:'設備異常',invalid:'時間異常',unknown:'狀態未確認'};
+const freshnessLabel=freshnessLabels[state]||'狀態未確認';
 const speedText=displayable?(speedValid?Math.round(speed)+' km/h'+(fresh?'':'（延遲資料）'):'官方未提供有效車速'):dataAgeMinutes!==null?'資料已逾時，暫不顯示即時車速':'未取得官方即時車速';
 const volumeAvailable=device.volumePerMinute!==null&&device.volumePerMinute!==undefined&&device.volumePerMinute!==''&&Number.isFinite(Number(device.volumePerMinute));
 const occupancyAvailable=device.occupancy!==null&&device.occupancy!==undefined&&device.occupancy!==''&&Number.isFinite(Number(device.occupancy));
