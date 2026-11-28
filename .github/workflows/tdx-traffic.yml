@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # VD 與其他 TDX API 請求放在同一工作流程序列執行，避免兩個 runner 同時觸發官方 429 限流。
+      # VD 與一般道路路況維持同一工作流序列執行；共用 TDX API 限流保護，避免並行請求觸發 429。
       - name: Refresh nationwide VD live data first
         env:
           TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
@@ -81,8 +81,6 @@ jobs:
           done
           echo "Unable to publish VD snapshot after 3 attempts."
           exit 1
-      - name: Brief cooldown between VD and road requests
-        run: sleep 15
       - name: Fetch nationwide official TDX traffic
         env:
           TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
