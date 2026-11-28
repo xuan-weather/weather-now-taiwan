@@ -16,6 +16,7 @@ import re
 import zipfile
 import io
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 from math import radians, sin, cos, sqrt, atan2
 
 MILEPOST_URL = "https://www.freeway.gov.tw/UserFiles/file/%E5%9C%8B%E9%81%93%E7%99%BE%E5%85%AC%E5%B0%BA%E9%87%8C%E7%A8%8B%E6%A8%81KML/%E6%95%B4%E6%A8%81%E5%8F%8A%E7%99%BE%E5%85%AC%E5%B0%BA%E9%87%8C%E7%A8%8B%E6%A8%81KML%28schema%E5%8A%A0%E5%85%A5%29.zip"
@@ -55,6 +56,45 @@ def parse_milepost_context(text, require_direction=False):
         return None
     road_code = road_match.group(1) + ("-high" if re.search(r"高架|汐止楊梅", text) else "")
     return road_code, direction, km
+
+class KMLDescriptionTableParser(HTMLParser):
+    """Extract key/value pairs from the Freeway Bureau CSV2KML HTML table."""
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+        self.cells = []
+        self.current = ""
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "tr": self.cells = []
+        elif tag.lower() in ("th", "td"): self.current = ""
+    def handle_data(self, data):
+        self.current += data
+    def handle_endtag(self, tag):
+        if tag.lower() in ("th", "td"): self.cells.append(clean_kml_cell(self.current))
+        elif tag.lower() == "tr" and self.cells:
+            self.rows.append(self.cells)
+
+def clean_kml_cell(value):
+    return " ".join(str(value or "").replace("\xa0", " ").split()).strip()
+
+def parse_kml_description(description):
+    parser = KMLDescriptionTableParser()
+    try:
+        parser.feed(description or "")
+    except Exception:
+        return {}
+    fields = {}
+    for row in parser.rows:
+        if len(row) >= 2:
+            fields[row[0].strip().lower()] = row[1].strip()
+    return fields
+
+def parse_kml_route_code(text):
+    text = normalize_road_text(text)
+    match = re.search(r"(?:國道|國)\s*(\d{1,2})\s*(?:號)?", text)
+    if not match:
+        return None
+    return match.group(1) + ("-high" if re.search(r"高架|汐止楊梅", text) else "")
 
 def parse_kml_mileposts(raw_zip):
     archive = zipfile.ZipFile(io.BytesIO(raw_zip))
@@ -98,14 +138,27 @@ def parse_kml_mileposts(raw_zip):
                 for element in node.iter()
                 if element.text and (element.text or "").strip()
             )
-            parsed = parse_milepost_context(" ".join((context, name, desc, " ".join(metadata_parts), all_text)))
+            # Freeway Bureau archive is CSV2KML: route name and mileage are
+            # stored in an HTML table inside <description>, not in the folder
+            # name. Folder IDs such as N0032 are dataset IDs, not route numbers.
+            table_fields = parse_kml_description(desc)
+            road_name = table_fields.get("roadname") or table_fields.get("road name") or ""
+            road_code = parse_kml_route_code(road_name)
+            km_text = table_fields.get("km") or table_fields.get("km2") or name
+            km_match = re.search(r"(\\d{1,3})\\s*K\\s*\\+\\s*(\\d{1,3})", km_text, re.I)
+            if km_match:
+                km_value = int(km_match.group(1)) + int(km_match.group(2)) / 1000
+            else:
+                km_match = re.search(r"(\\d{1,3})(?:\\.(\\d{1,3}))?", km_text)
+                km_value = (int(km_match.group(1)) + float("0." + (km_match.group(2) or "0"))) if km_match else None
+            parsed = (road_code, "", km_value) if road_code and km_value is not None else parse_milepost_context(" ".join((context, name, desc, " ".join(metadata_parts), all_text)))
             coord_text = ""
             for element in node.iter():
                 if local_name(element) == "coordinates" and element.text:
                     coord_text = element.text.strip()
                     break
             if len(debug_samples) < 12:
-                debug_samples.append({"context": context[:180], "name": name[:120], "description": desc[:160], "parsed": parsed, "coordinates": coord_text[:100]})
+                debug_samples.append({"context": context[:180], "name": name[:120], "roadName": road_name, "tableFields": table_fields, "parsed": parsed, "coordinates": coord_text[:100]})
             if parsed and coord_text:
                 values = coord_text.split()[0].split(",")
                 if len(values) >= 2:
