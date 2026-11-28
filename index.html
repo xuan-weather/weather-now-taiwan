@@ -296,9 +296,9 @@ const color=!fresh?'#94a3b8':speed>=60?'#10b981':speed>=40?'#f59e0b':speed>=20?'
 const marker=L.circleMarker([device.lat,device.lng],{renderer:map.getRenderer(map),radius:map.getZoom()>=13?6:5,color:'#0f172a',weight:1.2,fillColor:color,fillOpacity:.95}).addTo(layers.vd);
 const volumes=device.vehicleVolumes||{};
 const typeNames={M:'機車',S:'小型車',L:'大型車',T:'聯結車'};
-const vehicleText=Object.entries(typeNames).map(([key,label])=>label+' '+(Number(volumes[key])||0)).join('・');
+const vehicleText=device.dataCollectTime?Object.entries(typeNames).map(([key,label])=>label+' '+(Number(volumes[key])||0)).join('・'):'車種流量：未取得';
 const speedText=fresh?Math.round(speed)+' km/h':'尚無有效即時車速';
-const volumeText=Number.isFinite(Number(device.volumePerMinute))?Number(device.volumePerMinute)+' 輛/分鐘':'未提供';
+const volumeText=device.volumePerMinute!==null&&device.volumePerMinute!==undefined&&device.volumePerMinute!==''&&Number.isFinite(Number(device.volumePerMinute))?Number(device.volumePerMinute)+' 輛/分鐘':'未提供';
 const occupancyText=device.occupancy!==null&&device.occupancy!==undefined&&device.occupancy!==''&&Number.isFinite(Number(device.occupancy))?device.occupancy+'%':'未提供';
 const statusText=Number(device.status)===0?'正常':({1:'通訊異常',2:'停用／施工中',3:'設備故障'}[Number(device.status)]||'尚無即時狀態');
 const lanes=Number(device.laneCount)||0;
