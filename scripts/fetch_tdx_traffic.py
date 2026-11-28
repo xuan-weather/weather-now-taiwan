@@ -997,8 +997,9 @@ def fetch_vd_layer(bearer, static_cache):
             print(f"[VD LIVE WARN] {label}: {exc}", file=sys.stderr)
 
     live_devices = 0
+    live_speed_devices = 0
     for device in devices.values():
-        if device.get("status") != 0 or not device.get("dataCollectTime") or device.get("speed") is None:
+        if device.get("status") != 0 or not device.get("dataCollectTime"):
             continue
         try:
             collected = datetime.fromisoformat(str(device["dataCollectTime"]).replace("Z", "+00:00"))
@@ -1007,6 +1008,8 @@ def fetch_vd_layer(bearer, static_cache):
             age = (now - collected.astimezone(TW)).total_seconds()
             if -120 <= age <= 300:
                 live_devices += 1
+                if number_or_none(device.get("speed"), 0, 200) is not None:
+                    live_speed_devices += 1
         except (TypeError, ValueError):
             continue
 
@@ -1016,14 +1019,15 @@ def fetch_vd_layer(bearer, static_cache):
         "updateIntervalSeconds": 60,
         "totalDevices": len(devices),
         "liveDevices": live_devices,
-        "liveDataStatus": "僅成功配對、設備正常且觀測時間在 5 分鐘內的資料視為即時",
+        "liveSpeedDevices": live_speed_devices,
+        "liveDataStatus": "即時筆數依設備狀態與觀測時間判斷；有效車速另行統計",
         "sources": list(stats_by_key.values()),
         "devices": list(devices.values())
     }
     os.makedirs("data", exist_ok=True)
     with open("data/tdx-vd.json", "w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, separators=(",", ":"))
-    print(f"[VD] saved {len(devices)} official detector locations; fresh live={live_devices}.")
+    print(f"[VD] saved {len(devices)} official detector locations; fresh live={live_devices}; with valid speed={live_speed_devices}.")
 
 def main():
     bearer=token()
