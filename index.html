@@ -273,9 +273,10 @@ container.appendChild(card);
 async function loadOfficialTraffic(isManual=false){
 const icon=document.getElementById('refresh-icon');if(isManual)icon.classList.add('fa-spin');
 try{
-const [trafficRes,layersRes]=await Promise.all([
+const [trafficRes,incidentsRes,cctvRes]=await Promise.all([
 fetch('./data/tdx-traffic.json?ts='+Date.now(),{cache:'no-store'}),
-fetch('./data/tdx-layers.json?ts='+Date.now(),{cache:'no-store'}).catch(()=>null)
+fetch('./data/tdx-incidents.json?ts='+Date.now(),{cache:'no-store'}).catch(()=>null),
+fetch('./data/tdx-cctv.json?ts='+Date.now(),{cache:'no-store'}).catch(()=>null)
 ]);
 if(!trafficRes.ok)throw new Error(`路況資料 HTTP ${trafficRes.status}`);
 const payload=await trafficRes.json();
@@ -283,10 +284,11 @@ if(!Array.isArray(payload.segments)||payload.segments.length===0)throw new Error
 roadSegments=payload.segments.filter(s=>Array.isArray(s.coords)&&s.coords.length>=2&&Number.isFinite(Number(s.speed))).map(s=>{
 const meta=routeMeta(s);return {...s,...meta,speed:Number(s.speed),direction:s.direction||'',sourceLabel:s.sourceLabel||payload.source||'交通部 TDX'};
 });
-let supplemental={};
-if(layersRes&&layersRes.ok){try{supplemental=await layersRes.json();}catch(_){supplemental={};}}
-trafficEvents=Array.isArray(supplemental.incidents)?supplemental.incidents.map(e=>({...e,lat:Number(e.lat),lng:Number(e.lng),location:e.road||'道路位置未提供',lanes:e.lane||'未提供',description:e.desc||'',delay:'未提供'})):[];
-liveCctv=Array.isArray(supplemental.cctv)?supplemental.cctv.map(c=>({...c,lat:Number(c.lat),lng:Number(c.lng)})):[];
+let incidentData={},cctvData={};
+if(incidentsRes&&incidentsRes.ok){try{incidentData=await incidentsRes.json();}catch(_){incidentData={};}}
+if(cctvRes&&cctvRes.ok){try{cctvData=await cctvRes.json();}catch(_){cctvData={};}}
+trafficEvents=Array.isArray(incidentData.incidents)?incidentData.incidents.map(e=>({...e,lat:Number(e.lat),lng:Number(e.lng),location:e.road||'道路位置未提供',lanes:e.lane||'未提供',description:e.desc||'',delay:'未提供'})):[];
+liveCctv=Array.isArray(cctvData.cctv)?cctvData.cctv.map(c=>({...c,lat:Number(c.lat),lng:Number(c.lng)})):[];
 sourceMeta=payload;
 const official=payload.officialDataAt||payload.generatedAt;
 document.getElementById('last-update-time').textContent=official?formatTime(official):'時間未提供';
