@@ -328,7 +328,7 @@ const limit=map.getZoom()>=13?900:450;
 visible.slice(0,limit).forEach(device=>{
 const fresh=vdIsFresh(device),displayable=vdIsDisplayable(device),speed=Number(device.speed),speedValid=vdHasValidSpeed(device);
 const color=!displayable?'#94a3b8':!speedValid?'#64748b':speed>=60?'#10b981':speed>=40?'#f59e0b':speed>=20?'#f97316':'#ef4444';
-const marker=L.circleMarker([device.lat,device.lng],{renderer:map.getRenderer(map),radius:map.getZoom()>=13?6:5,color:'#0f172a',weight:1.2,fillColor:color,fillOpacity:fresh?.95:displayable?.65:.35}).addTo(layers.vd);
+const marker=L.circleMarker([device.lat,device.lng],{renderer:map.getRenderer(map),radius:map.getZoom()>=13?6:5,color:'#0f172a',weight:1.2,fillColor:color,fillOpacity:fresh ? 0.95 : displayable ? 0.65 : 0.35}).addTo(layers.vd);
 const volumes=device.vehicleVolumes||{};
 const typeNames={M:'機車',S:'小型車',L:'大型車',T:'聯結車'};
 const vehicleText=device.dataCollectTime?Object.entries(typeNames).map(([key,label])=>label+' '+(Number(volumes[key])||0)).join('・'):'車種流量：未取得';
