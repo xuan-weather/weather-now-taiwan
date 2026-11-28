@@ -26,7 +26,7 @@ jobs:
         env:
           TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
           TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
-        run: python scripts/fetch_tdx_traffic.py --skip-vd
+        run: python scripts/fetch_tdx_traffic.py --traffic-only
       - name: Commit refreshed traffic JSON
         run: |
           set -euo pipefail
@@ -38,8 +38,6 @@ jobs:
           cp data/tdx-traffic.json "$DATA_DIR/"
           cp data/tdx-shapes-cache.json "$DATA_DIR/"
           cp data/tdx-congestion-definitions.json "$DATA_DIR/"
-          cp data/tdx-layers.json "$DATA_DIR/"
-          cp data/tdx-layers-cache.json "$DATA_DIR/"
 
           for attempt in 1 2 3; do
             echo "Sync and push attempt $attempt/3"
@@ -86,11 +84,9 @@ jobs:
             cp "$DATA_DIR/tdx-traffic.json" data/
             cp "$DATA_DIR/tdx-shapes-cache.json" data/
             cp "$DATA_DIR/tdx-congestion-definitions.json" data/
-            cp "$DATA_DIR/tdx-layers.json" data/
-            cp "$DATA_DIR/tdx-layers-cache.json" data/
 
             # Stage refreshed files before checking whether there are changes.
-            git add data/tdx-traffic.json data/tdx-shapes-cache.json data/tdx-congestion-definitions.json data/tdx-layers.json data/tdx-layers-cache.json
+            git add data/tdx-traffic.json data/tdx-shapes-cache.json data/tdx-congestion-definitions.json
 
             if git diff --cached --quiet; then
               echo "No traffic data changes."
