@@ -83,10 +83,20 @@ def parse_kml_description(description):
         parser.feed(description or "")
     except Exception:
         return {}
+    if not parser.rows:
+        return {}
+    # CSV2KML description uses a header row (RoadName, LR, X, Y, ...)
+    # followed by one or more value rows. Do not treat header cells as data.
+    headers = [clean_kml_cell(value).lower() for value in parser.rows[0]]
     fields = {}
-    for row in parser.rows:
-        if len(row) >= 2:
-            fields[row[0].strip().lower()] = row[1].strip()
+    for row in parser.rows[1:]:
+        if len(row) < 2:
+            continue
+        for index, header in enumerate(headers):
+            if header and index < len(row):
+                fields[header] = clean_kml_cell(row[index])
+        if fields:
+            break
     return fields
 
 def parse_kml_route_code(text):
@@ -158,7 +168,7 @@ def parse_kml_mileposts(raw_zip):
                     coord_text = element.text.strip()
                     break
             if len(debug_samples) < 12:
-                debug_samples.append({"context": context[:180], "name": name[:120], "roadName": road_name, "tableFields": table_fields, "parsed": parsed, "coordinates": coord_text[:100]})
+                debug_samples.append({"context": context[:180], "name": name[:120], "roadName": road_name, "tableFields": table_fields, "descriptionPreview": desc[:500], "parsed": parsed, "coordinates": coord_text[:100]})
             if parsed and coord_text:
                 values = coord_text.split()[0].split(",")
                 if len(values) >= 2:
