@@ -965,7 +965,8 @@ def fetch_vd_layer(bearer, static_cache):
     """Fetch official VD static positions and bulk one-minute live observations."""
     static_sources = [(code, name, "city") for code, name, _region in VD_STATIC_CITIES]
     static_sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
-    live_sources = [(code, name, "city") for code, name, _region in LIVE_CITIES]
+# VD Live/City 僅接受 VD_STATIC_CITIES 中經官方 HTTP 400 回應確認的代碼；不可沿用一般路況 LIVE_CITIES。
+    live_sources = [(code, name, "city") for code, name, _region in VD_STATIC_CITIES]
     live_sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
     devices = {}
     stats_by_key = {}
