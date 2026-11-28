@@ -233,6 +233,12 @@
         <span class="font-medium">警廣即時路況</span>
         <span class="ml-auto text-[10px] text-slate-400">站內查看</span>
       </button>
+      <button type="button" onclick="openHighwayAccidents()"
+        class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-xs text-slate-100 hover:bg-white/10 transition">
+        <span class="text-rose-300">🚨</span>
+        <span class="font-medium">國道車禍查詢</span>
+        <span class="ml-auto text-[10px] text-slate-400">站內查看</span>
+      </button>
     </div>
 
     <!-- 警廣即時路況站內頁面 -->
@@ -258,6 +264,30 @@
         <footer class="px-4 py-2 border-t border-white/10 text-[10px] text-slate-400">
           資料來源：警察廣播電臺／政府資料開放平臺（政府資料開放授權條款第1版）。官方資料最多提供最新1,000筆，與警廣查詢網頁可能有最多1分鐘時間差。
         </footer>
+      </div>
+    </section>
+
+    <!-- 國道車禍查詢站內頁面 -->
+    <section id="highway-accident-page" class="hidden fixed inset-0 z-[1200] bg-slate-950/95 text-slate-100 pointer-events-auto">
+      <div class="h-full flex flex-col max-w-5xl mx-auto">
+        <header class="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-slate-900/95">
+          <button type="button" onclick="closeHighwayAccidents()" class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/15 flex items-center justify-center" aria-label="返回即時路況地圖">←</button>
+          <div class="min-w-0 flex-1">
+            <div class="font-bold text-base">🚨 國道車禍查詢</div>
+            <div id="highway-accident-meta" class="text-[11px] text-slate-400">正在載入 TDX 國道事件資料…</div>
+          </div>
+          <button type="button" onclick="loadHighwayAccidents(true)" class="px-3 py-2 rounded-xl bg-sky-500 text-white text-xs font-semibold">重新整理</button>
+        </header>
+        <div class="p-3 border-b border-white/10 grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-2">
+          <input id="highway-accident-search" type="search" placeholder="搜尋國道、里程、方向或事故內容…" oninput="renderHighwayAccidents()" class="w-full rounded-xl bg-slate-800 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-400 outline-none focus:border-sky-400">
+          <select id="highway-accident-road" onchange="renderHighwayAccidents()" class="rounded-xl bg-slate-800 border border-white/10 px-3 py-2.5 text-sm text-white">
+            <option value="all">全部國道</option><option value="國道一號">國道一號</option><option value="國道三號">國道三號</option><option value="國道五號">國道五號</option><option value="國道二號">國道二號</option><option value="國道四號">國道四號</option><option value="國道六號">國道六號</option><option value="國道八號">國道八號</option><option value="國道十號">國道十號</option>
+          </select>
+        </div>
+        <div id="highway-accident-list" class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2">
+          <div class="rounded-xl bg-slate-800 p-4 text-sm text-slate-300">正在載入國道事故資料…</div>
+        </div>
+        <footer class="px-4 py-2 border-t border-white/10 text-[10px] text-slate-400">資料來源：交通部 TDX 國道即時事件資料。僅顯示官方資料中可辨識的車禍／事故事件，不將施工、開放路肩或一般散落物誤列為車禍。</footer>
       </div>
     </section>
 
@@ -1438,6 +1468,76 @@
     let pbsTrafficRecords = [];
     let pbsTrafficFetchedAt = null;
     let pbsTrafficLoading = false;
+    let highwayAccidentRecords = [];
+    let highwayAccidentFetchedAt = null;
+    let highwayAccidentLoading = false;
+    function openHighwayAccidents() {
+      toggleQuickMenu(false);
+      document.body.classList.add('pbs-page-open');
+      document.getElementById('highway-accident-page').classList.remove('hidden');
+      document.getElementById('highway-accident-search').value = '';
+      document.getElementById('highway-accident-road').value = 'all';
+      loadHighwayAccidents(false);
+    }
+    function closeHighwayAccidents() {
+      document.getElementById('highway-accident-page').classList.add('hidden');
+      document.body.classList.remove('pbs-page-open');
+    }
+    async function loadHighwayAccidents(force) {
+      if (highwayAccidentLoading) return;
+      highwayAccidentLoading = true;
+      const list = document.getElementById('highway-accident-list');
+      const meta = document.getElementById('highway-accident-meta');
+      if (!highwayAccidentRecords.length) list.innerHTML = '<div class="rounded-xl bg-slate-800 p-4 text-sm text-slate-300">正在載入國道事故資料…</div>';
+      try {
+        const response = await fetch('./data/tdx-incidents.json?ts=' + Date.now(), {cache:'no-store'});
+        if (!response.ok) throw new Error('TDX 事故資料讀取失敗（HTTP ' + response.status + '）');
+        const payload = await response.json();
+        const rows = Array.isArray(payload.incidents) ? payload.incidents : [];
+        highwayAccidentRecords = rows.filter(row => {
+          const road = String(row.road || row.title || '');
+          const authority = String(row.authority || '').toLowerCase();
+          const text = String((row.title || '') + ' ' + (row.desc || ''));
+          const isFreeway = authority === 'freeway' || /國道[一二三四五六七八十0-9]+號/.test(road);
+          const isAccident = /車禍|追撞|自撞|翻覆|碰撞|事故現場|事故處理|故障車|車輛故障|拋錨|人員受傷|傷亡/.test(text);
+          return isFreeway && row.type !== 'roadwork' && isAccident;
+        }).sort((a,b) => new Date(b.time || 0) - new Date(a.time || 0));
+        highwayAccidentFetchedAt = payload.generatedAt || null;
+        meta.textContent = '官方國道事件 ' + rows.filter(row => String(row.authority || '').toLowerCase() === 'freeway').length.toLocaleString('zh-TW') + ' 筆｜符合車禍條件 ' + highwayAccidentRecords.length.toLocaleString('zh-TW') + ' 件' + (highwayAccidentFetchedAt ? '｜同步 ' + new Date(highwayAccidentFetchedAt).toLocaleString('zh-TW') : '');
+        renderHighwayAccidents();
+      } catch (error) {
+        meta.textContent = '國道事故資料暫時無法載入';
+        list.innerHTML = '<div class="rounded-xl bg-rose-500/10 border border-rose-400/20 p-4 text-sm text-rose-200">國道事故資料載入失敗：' + pbsEscape(error.message) + '</div>';
+      } finally {
+        highwayAccidentLoading = false;
+      }
+    }
+    function renderHighwayAccidents() {
+      const list = document.getElementById('highway-accident-list');
+      if (!list) return;
+      const query = (document.getElementById('highway-accident-search')?.value || '').trim().toLowerCase();
+      const road = document.getElementById('highway-accident-road')?.value || 'all';
+      const filtered = highwayAccidentRecords.filter(row => {
+        const roadName = String(row.road || row.title || '');
+        if (road !== 'all' && !roadName.includes(road)) return false;
+        const haystack = [row.road,row.title,row.desc,row.lane,row.time].join(' ').toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      if (!filtered.length) {
+        list.innerHTML = '<div class="rounded-xl bg-slate-800 border border-white/10 p-5 text-center"><div class="text-2xl mb-2">🛣️</div><div class="text-sm font-semibold text-slate-200">目前沒有符合條件的國道車禍資料</div><div class="mt-1 text-xs text-slate-400">可能目前沒有符合條件的官方事故通報，或可調整搜尋條件再查詢。</div></div>';
+        return;
+      }
+      list.innerHTML = filtered.map(row => {
+        const title = pbsEscape(row.title || row.road || '國道事故通報');
+        const desc = pbsEscape(row.desc || '官方未提供詳細說明');
+        const roadName = pbsEscape(row.road || '國道');
+        const time = row.time ? new Date(row.time).toLocaleString('zh-TW', {hour12:false}) : '時間未提供';
+        const direction = /北向|南向|東向|西向/.exec(String(row.title || row.desc || ''))?.[0] || '方向未提供';
+        const lane = row.lane ? pbsEscape(row.lane) : '車道資訊未提供';
+        return '<article class="pbs-card"><div class="flex items-start justify-between gap-2"><div class="text-sm font-bold text-white">' + roadName + '｜' + pbsEscape(direction) + '</div><span class="shrink-0 rounded-full bg-rose-500/15 px-2 py-1 text-[10px] font-semibold text-rose-300">車禍／事故</span></div><div class="mt-2 text-sm font-semibold text-slate-100">' + title + '</div><p class="mt-2 text-xs leading-5 text-slate-300 whitespace-pre-wrap">' + desc + '</p><div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400"><span>發生時間：' + pbsEscape(time) + '</span><span>' + lane + '</span></div></article>';
+      }).join('');
+    }
+
     function openPbsTraffic() {
       toggleQuickMenu(false);
       document.body.classList.add('pbs-page-open');
