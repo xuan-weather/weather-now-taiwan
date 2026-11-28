@@ -414,6 +414,8 @@ def official_congestion_status(item, definition, speed=None):
     candidate = level_name or str(raw_level or "").strip()
     if "封閉" in candidate or level_number == -1:
         status = "道路封閉"
+    elif level_number == -99 or "資料異常" in candidate:
+        status = "資料異常"
     elif "資料不足" in candidate or level_number == 0:
         status = "資料不足"
     elif candidate in ("順暢", "車多", "壅塞", "嚴重壅塞", "極度壅塞"):
@@ -443,9 +445,17 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
         speed=speed_value(item)
         if not sid or not coords or speed is None:
             continue
-        definition = (level_index or {}).get(
-            f"{first_text(item,('AuthorityCode','_FeedAuthorityCode'),'')}:{str(item.get('CongestionLevelID','')).strip()}"
-        ) or (level_index or {}).get(str(item.get("CongestionLevelID", "")).strip())
+        raw_group_id = str(item.get("CongestionLevelID", "")).strip()
+        authority = first_text(item, ("AuthorityCode", "_FeedAuthorityCode"), "")
+        definition = (level_index or {}).get(f"{authority}:{raw_group_id}") or (level_index or {}).get(raw_group_id)
+
+        # TDX 全國國道／省道各自只有一組官方 Speed 分級定義。
+        # 部分 Live 回應未帶 CongestionLevelID，改用該道路類別的官方組別，
+        # 仍以官方公布的 LowValue / TopValue 判斷，不自行設定車速門檻。
+        if definition is None and level_index:
+            default_group_id = "A" if region in ("freeway", "highway") else "F"
+            definition = level_index.get(default_group_id)
+
         status, level_number, level_name = official_congestion_status(item, definition, speed)
         output.append({
             "id":f"{region}:{sid}",
