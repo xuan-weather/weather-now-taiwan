@@ -104,7 +104,24 @@ def atomic_write(content):
 
 
 def main():
-    payload, count = fetch_payload()
+    try:
+        payload, count = fetch_payload()
+    except RuntimeError as exc:
+        # PBS occasionally times out or is unreachable from GitHub-hosted runners.
+        # Keep the last successful snapshot and let the scheduled workflow finish
+        # successfully; never refresh fetchedAt for data that was not re-fetched.
+        print(f"::warning::PBS source unavailable; preserving previous snapshot: {exc}")
+        if OUT.exists():
+            try:
+                previous = json.loads(OUT.read_text(encoding="utf-8"))
+                previous_count = count_records(previous.get("records", [])) if isinstance(previous, dict) else 0
+                print(f"Preserved existing PBS snapshot ({previous_count} records).")
+            except (OSError, ValueError, TypeError):
+                print("Existing PBS snapshot could not be parsed; file was left untouched.")
+        else:
+            print("No previous PBS snapshot exists yet; waiting for the first successful source response.")
+        return
+
     result = {
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
         "source": URL,
@@ -113,7 +130,6 @@ def main():
         "status": "ok",
     }
     # Write only after a complete, non-empty response has been validated.
-    # On network/API failure, the existing last-known-good file is untouched.
     atomic_write(result)
     print(f"Saved PBS traffic snapshot: {count} records")
 
