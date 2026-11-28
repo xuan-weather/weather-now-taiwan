@@ -46,6 +46,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/pbs-traffic.json
+          if [ -f data/highway-mileposts.json ]; then git add data/highway-mileposts.json; fi
           if git diff --cached --quiet; then
             echo "No PBS traffic changes"
             exit 0
