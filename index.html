@@ -1053,8 +1053,8 @@
             : (/交通障礙|散落物|掉落物|障礙物/.test(rawType + ' ' + text) ? 'obstruction'
             : (/阻塞|壅塞|車多/.test(rawType + ' ' + text) ? 'congestion'
             : (/管制/.test(rawType + ' ' + text) ? 'traffic_control' : 'other')))));
-          const lat = Number(row.lat ?? row.latitude ?? row.Latitude ?? row.y);
-          const lng = Number(row.lng ?? row.lon ?? row.longitude ?? row.Longitude ?? row.x);
+          const lat = Number(row.lat ?? row.latitude ?? row.Latitude ?? row.y ?? row.y1);
+          const lng = Number(row.lng ?? row.lon ?? row.longitude ?? row.Longitude ?? row.x ?? row.x1);
           if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 20 || lat > 27 || lng < 118 || lng > 123) return;
           markers.push({
             id: 'PBS-' + String(row.UID || markers.length),
