@@ -160,19 +160,15 @@ opacity: 0;
 </p><ul class="list-disc pl-4 space-y-1 text-slate-400"><li><strong class="text-slate-200">即時車速與旅行時間 (LiveTraffic)：</strong>呼叫 <code class="text-cyan-400 bg-slate-800 px-1 rounded">GET /v2/Road/Traffic/Live/Freeway</code> 取得各路段 <code class="text-slate-200">TravelSpeed</code> 與 <code class="text-slate-200">CongestionLevel</code>。</li><li><strong class="text-slate-200">即時事件與施工 (LiveIncident)：</strong>呼叫 <code class="text-cyan-400 bg-slate-800 px-1 rounded">GET /v2/Road/Traffic/Live/Incident/Freeway</code> 取得事故座標與車道占用狀態。</li><li><strong class="text-slate-200">CCTV 與 CMS 資訊：</strong>分別透過 <code class="text-cyan-400 bg-slate-800 px-1 rounded">/CCTV/Freeway</code> 與 <code class="text-cyan-400 bg-slate-800 px-1 rounded">/CMS/Live/Freeway</code> 取得即時影像串流連結與電子看板文字。</li></ul></div></div><div class="px-5 py-3 bg-slate-800/40 border-t border-slate-800 flex justify-end gap-2"><button onclick="closeTdxModal()" class="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold transition cursor-pointer">
 套用並關閉
 </button></div></div></div><!-- 系統提示訊息 Toast --><div id="toast-notification" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-opacity duration-300"><div class="bg-slate-900/95 backdrop-blur-md border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded-full shadow-2xl text-xs font-medium flex items-center gap-2"><i class="fa-solid fa-circle-check text-emerald-400"></i><span id="toast-message">已更新至最新路況資料</span></div></div><!-- ==================== JavaScript 核心邏輯：僅顯示官方資料 ==================== --><script>
-const map = L.map('map', {center:[23.7,120.95],zoom:8,zoomControl:false,attributionControl:true});
-// 使用 Esri 公開深色底圖，避免 CARTO API KEY REQUIRED 水印導致整張地圖無法顯示。
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-attribution:'Tiles &copy; Esri, HERE, Garmin, (c) OpenStreetMap contributors | 即時資料：交通部 TDX',
-maxZoom:16,
-maxNativeZoom:16
-}).addTo(map);
-// 深色道路名稱與地名標註圖層。
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-attribution:'Labels &copy; Esri',
-maxZoom:16,
-maxNativeZoom:16,
-pane:'overlayPane'
+const map = L.map('map', {center:[23.7,120.95],zoom:8,zoomControl:false,attributionControl:true,preferCanvas:true});
+// 回復原本 CARTO 深色路網底圖（使用公開 cartocdn 瓦片，不使用需要金鑰的 carto.com API）。
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+attribution:'&copy; OpenStreetMap &copy; CARTO | 即時資料：交通部 TDX',
+subdomains:'abcd',
+maxZoom:19,
+updateWhenIdle:true,
+updateWhenZooming:false,
+keepBuffer:2
 }).addTo(map);
 const layers={traffic:L.layerGroup().addTo(map),events:L.layerGroup().addTo(map),cctv:L.layerGroup().addTo(map),cms:L.layerGroup().addTo(map)};
 let activeHighways=new Set(['ALL']);
@@ -226,8 +222,8 @@ if(!Array.isArray(seg.coords)||seg.coords.length<2)return;
 const fresh=segmentFresh(seg),speed=Number(seg.speed),style=getSpeedStyle(speed,fresh);
 if(!fresh)stale++;else if(speed>=80)smooth++;else if(speed>=60)busy++;else congested++;
 if(!passesFilter(seg))return;
-L.polyline(seg.coords,{color:style.color,weight:9,opacity:fresh?.22:.12,lineCap:'round',lineJoin:'round',interactive:false}).addTo(layers.traffic);
-const line=L.polyline(seg.coords,{color:style.color,weight:4,opacity:fresh?.95:.65,lineCap:'round',lineJoin:'round',className:style.glow}).addTo(layers.traffic);
+// Canvas 單層繪製：避免每條路段建立兩個 SVG 與發光濾鏡，降低手機重繪負擔。
+const line=L.polyline(seg.coords,{renderer:map.getRenderer(map),color:style.color,weight:4,opacity:fresh?.92:.55,lineCap:'round',lineJoin:'round',interactive:true}).addTo(layers.traffic);
 line.bindPopup(`<div class="p-3.5"><div class="flex items-center justify-between gap-2 mb-2"><b class="text-xs text-cyan-300">${esc(seg.highwayName)}</b><span class="text-xs">${style.label}</span></div><h4 class="font-bold text-sm mb-2">${esc(seg.name)}</h4><div class="text-sm">車速：<b style="color:${style.color}">${fresh&&Number.isFinite(speed)?Math.round(speed)+' km/h':'待確認'}</b></div><div class="text-xs text-slate-400 mt-1">觀測時間：${esc(formatTime(seg.updateTime))}</div><div class="text-xs text-slate-500 mt-1">來源：${esc(seg.sourceLabel||'交通部 TDX')}</div></div>`);
 seg.leafletLayer=line;
 });
@@ -245,14 +241,23 @@ const marker=L.marker([evt.lat,evt.lng],{icon}).addTo(layers.events);
 marker.bindPopup(`<div class="p-3.5"><span class="text-xs font-bold" style="color:${color}">${eventTypeLabel(evt.type)}</span><h4 class="font-bold text-sm my-2">${esc(evt.title)}</h4><div class="text-xs text-cyan-300">${esc(evt.road||'道路位置未提供')}</div><p class="text-xs text-slate-300 mt-2">${esc(evt.desc||'官方事件資料未提供詳細說明')}</p><div class="text-xs text-slate-400 mt-2">發佈/更新：${esc(formatTime(evt.time))}</div><div class="text-[10px] text-slate-500 mt-1">來源：交通部 TDX 道路事件</div></div>`);
 evt.leafletMarker=marker;
 });
+renderCctvLayer();
+}
+function renderCctvLayer(){
+layers.cctv.clearLayers();
+// 全台總覽時不建立數千個 DOM marker；放大到道路層級才顯示 CCTV。
+if(map.getZoom()<10)return;
 liveCctv.forEach(cam=>{
 if(!Number.isFinite(cam.lat)||!Number.isFinite(cam.lng))return;
 const icon=L.divIcon({className:'custom-cctv-marker',html:'<div class="w-7 h-7 rounded-lg bg-slate-900 border border-sky-400 shadow-lg flex items-center justify-center text-sky-400"><i class="fa-solid fa-video text-xs"></i></div>',iconSize:[28,28],iconAnchor:[14,14]});
 const marker=L.marker([cam.lat,cam.lng],{icon}).addTo(layers.cctv);
-const media=cam.imageUrl?`<img src="${esc(cam.imageUrl)}" alt="CCTV 即時影像" class="w-full rounded-lg mt-2" loading="lazy">`:'';
-const link=cam.streamUrl?`<a href="${esc(cam.streamUrl)}" target="_blank" rel="noopener" class="inline-block mt-2 text-cyan-300 underline">開啟官方影像</a>`:'<div class="text-xs text-slate-400 mt-2">官方資料未提供可直接播放的影像網址</div>';
-marker.bindPopup(`<div class="p-3"><b class="text-sm">${esc(cam.name)}</b><div class="text-xs text-slate-400 mt-1">${esc(cam.direction||'')}</div>${media}${link}<div class="text-[10px] text-slate-500 mt-2">來源：TDX CCTV</div></div>`);
+const media=cam.imageUrl?'<img src="'+esc(cam.imageUrl)+'" alt="CCTV 即時影像" class="w-full rounded-lg mt-2" loading="lazy">':'';
+const link=cam.streamUrl?'<a href="'+esc(cam.streamUrl)+'" target="_blank" rel="noopener" class="inline-block mt-2 text-cyan-300 underline">開啟官方影像</a>':'<div class="text-xs text-slate-400 mt-2">官方資料未提供可直接播放的影像網址</div>';
+marker.bindPopup('<div class="p-3"><b class="text-sm">'+esc(cam.name)+'</b><div class="text-xs text-slate-400 mt-1">'+esc(cam.direction||'')+'</div>'+media+link+'<div class="text-[10px] text-slate-500 mt-2">來源：TDX CCTV</div></div>');
 });
+}
+map.on('zoomend',renderCctvLayer);
+document.getElementById('data-mode-badge')
 document.getElementById('data-mode-badge').textContent=`● 官方 TDX 資料｜有效 ${roadSegments.length-stale} 段 / 逾期 ${stale} 段`;
 document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
 }
