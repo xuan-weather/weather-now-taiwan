@@ -16,7 +16,7 @@ if not CLIENT_ID or not CLIENT_SECRET:
 TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 API_ROOT = "https://tdx.transportdata.tw/api/basic/v2"
 TW = timezone(timedelta(hours=8))
-MIN_REQUEST_INTERVAL = 12.0  # 降低 429；線型資料另做 7 天快取，減少重複 API 請求
+MIN_REQUEST_INTERVAL = 6.0  # 全台 VD 與道路路況共用單一序列工作；在保留 429 退避的前提下縮短更新週期
 _last_request_at = 0.0
 
 # TDX 各路況端點的 City enum 不相同，依錯誤回應列出的清單分開設定。
