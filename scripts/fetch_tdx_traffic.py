@@ -272,18 +272,37 @@ def section_id(item):
 def geometry_points(item):
     geom = item.get("Geometry") or item.get("geometry") or item.get("WKT")
     if isinstance(geom, dict):
-        if geom.get("type") == "LineString":
-            coords = geom.get("coordinates", [])
-            return [[float(lat),float(lon)] for lon,lat,*_ in coords if len([lon,lat]) == 2]
-        return []
+        kind = str(geom.get("type", "")).lower()
+        raw = geom.get("coordinates", [])
+        if kind == "linestring":
+            lines = [raw]
+        elif kind == "multilinestring":
+            lines = raw
+        else:
+            return []
+        points=[]
+        for line in lines:
+            for coord in line:
+                if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                    continue
+                try:
+                    lon, lat = float(coord[0]), float(coord[1])
+                    if 118 <= lon <= 123 and 20 <= lat <= 27:
+                        points.append([lat, lon])
+                except (TypeError, ValueError):
+                    continue
+        return points if len(points) >= 2 else []
     if not isinstance(geom, str):
         return []
-    match = re.search(r"LINESTRING\s*(?:Z\s*)?\((.+)\)", geom, re.I)
+    match = re.search(r"(?:MULTI)?LINESTRING\s*(?:Z\s*)?\((.+)\)", geom, re.I)
     if not match:
         return []
+    body = match.group(1)
+    # WKT MULTILINESTRING has one extra pair of parentheses per component.
+    pairs = re.findall(r"\(?\s*([\-\d.]+\s+[\-\d.]+(?:\s+[-\d.]+)?)\s*\)?", body)
     points=[]
-    for pair in match.group(1).split(","):
-        values=pair.strip().split()
+    for pair in pairs:
+        values=pair.split()
         if len(values)<2: continue
         try:
             lon,lat=float(values[0]),float(values[1])
@@ -292,6 +311,42 @@ def geometry_points(item):
         except ValueError:
             pass
     return points if len(points)>=2 else []
+
+def extract_link_ids(value):
+    found=[]
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("LinkID") is not None:
+                found.append(str(node["LinkID"]).strip())
+            else:
+                for child in node.values():
+                    walk(child)
+        elif isinstance(node, (list, tuple)):
+            for child in node:
+                walk(child)
+        elif isinstance(node, str):
+            raw=node.strip()
+            if not raw:
+                return
+            if raw.startswith("[") or raw.startswith("{"):
+                try:
+                    walk(json.loads(raw))
+                    return
+                except json.JSONDecodeError:
+                    pass
+            found.extend(part.strip() for part in re.split(r"[,;|\\s]+", raw) if part.strip())
+    walk(value)
+    return list(dict.fromkeys(x for x in found if x))
+
+def build_link_to_sections(section_link_rows):
+    mapping={}
+    for item in section_link_rows or []:
+        sid=section_id(item)
+        if not sid:
+            continue
+        for link_id in extract_link_ids(item.get("LinkID") or item.get("LinkIDs")):
+            mapping.setdefault(link_id, set()).add(sid)
+    return mapping
 
 def speed_value(item):
     for key in ("TravelSpeed","AverageSpeed","AvgSpeed","Speed","SectionSpeed","SpeedValue","TrafficSpeed"):
@@ -461,7 +516,7 @@ def official_congestion_status(item, definition, speed=None):
         status = "官方分級未提供"
     return status, level_number, level_name
 
-def build_segments(live_rows, shape_rows, region, label, source, section_rows=None, level_index=None):
+def build_segments(live_rows, shape_rows, region, label, source, section_rows=None, level_index=None, link_to_sections=None, diagnostics=None):
     shape_by_id={}
     for item in shape_rows:
         sid=section_id(item)
@@ -473,44 +528,75 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
         sid=section_id(item)
         if sid:
             name_by_id[sid]=first_text(item,("SectionName","RoadName","RoadNameZh","Name"),f"{label} 路段 {sid}")
+    diag=diagnostics if isinstance(diagnostics,dict) else None
+    if diag is not None:
+        diag.update({"liveRecords":len(live_rows),"shapeRecords":len(shape_rows),"shapeIds":len(shape_by_id),
+                     "liveWithSectionID":0,"liveWithLinkIDs":0,"matchedBySectionID":0,"matchedByLinkID":0,
+                     "skippedNoSectionReference":0,"skippedNoShape":0,"skippedNoSpeed":0})
     output=[]
+    emitted=set()
     for item in live_rows:
-        sid=section_id(item)
-        coords=shape_by_id.get(sid)
+        direct_sid=section_id(item)
+        link_values=extract_link_ids(item.get("LinkIDs") or item.get("LinkID"))
+        if diag is not None:
+            if direct_sid: diag["liveWithSectionID"]+=1
+            if link_values: diag["liveWithLinkIDs"]+=1
+        section_ids=[]
+        matched_direct=False
+        if direct_sid:
+            section_ids=[direct_sid]
+            matched_direct=direct_sid in shape_by_id
+        if not matched_direct and link_to_sections and link_values:
+            mapped=[]
+            for link_id in link_values:
+                mapped.extend(sorted(link_to_sections.get(link_id, ())))
+            if mapped:
+                section_ids=list(dict.fromkeys(mapped))
+                if diag is not None: diag["matchedByLinkID"]+=1
+        elif matched_direct and diag is not None:
+            diag["matchedBySectionID"]+=1
+        if not section_ids:
+            if diag is not None: diag["skippedNoSectionReference"]+=1
+            continue
         speed=speed_value(item)
-        if not sid or not coords or speed is None:
+        if speed is None:
+            if diag is not None: diag["skippedNoSpeed"]+=1
             continue
         raw_group_id = str(item.get("CongestionLevelID", "")).strip()
         authority = first_text(item, ("AuthorityCode", "_FeedAuthorityCode"), "")
         definition = (level_index or {}).get(f"{authority}:{raw_group_id}") or (level_index or {}).get(raw_group_id)
-
-        # TDX 全國國道／省道各自只有一組官方 Speed 分級定義。
-        # 部分 Live 回應未帶 CongestionLevelID，改用該道路類別的官方組別，
-        # 仍以官方公布的 LowValue / TopValue 判斷，不自行設定車速門檻。
         if definition is None and level_index:
             default_group_id = "A" if region in ("freeway", "highway") else "F"
             definition = level_index.get(default_group_id)
-
         status, level_number, level_name = official_congestion_status(item, definition, speed)
-        output.append({
-            "id":f"{region}:{sid}",
-            "sectionId":sid,
-            "name":first_text(item,("SectionName","RoadName","RoadNameZh","Name"),name_by_id.get(sid,f"{label} 路段 {sid}")),
-            "region":region,
-            "regionLabel":label,
-            "speed":speed,
-            "travelTime":item.get("TravelTime"),
-            "congestionLevel":item.get("CongestionLevel"),
-            "congestionLevelId":item.get("CongestionLevelID"),
-            "congestionLevelNumber":level_number,
-            "congestionLevelName":level_name,
-            "congestionStatus":status,
-            "authorityCode":first_text(item,("AuthorityCode","_FeedAuthorityCode"),""),
-            "congestionDefinition":definition,
-            "coords":coords,
-            "sourceLabel":source,
-            "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime","_FeedUpdateTime"),"")
-        })
+        for sid in section_ids:
+            coords=shape_by_id.get(sid)
+            if not coords:
+                if diag is not None: diag["skippedNoShape"]+=1
+                continue
+            unique_id=f"{region}:{sid}"
+            if unique_id in emitted:
+                continue
+            emitted.add(unique_id)
+            output.append({
+                "id":unique_id,
+                "sectionId":sid,
+                "name":first_text(item,("SectionName","RoadName","RoadNameZh","Name"),name_by_id.get(sid,f"{label} 路段 {sid}")),
+                "region":region,
+                "regionLabel":label,
+                "speed":speed,
+                "travelTime":item.get("TravelTime"),
+                "congestionLevel":item.get("CongestionLevel"),
+                "congestionLevelId":item.get("CongestionLevelID"),
+                "congestionLevelNumber":level_number,
+                "congestionLevelName":level_name,
+                "congestionStatus":status,
+                "authorityCode":first_text(item,("AuthorityCode","_FeedAuthorityCode"),""),
+                "congestionDefinition":definition,
+                "coords":coords,
+                "sourceLabel":source,
+                "updateTime":first_text(item,("DataCollectTime","SrcUpdateTime","UpdateTime","_FeedUpdateTime"),"")
+            })
     return output
 
 
@@ -725,11 +811,24 @@ def main():
         try:
             live = rows(f"Road/Traffic/Live/City/{city_code}", bearer)
             shapes = cached_shape_rows(f"Road/Traffic/SectionShape/City/{shape_city[0]}", bearer, shape_cache)
+            shape_ids={section_id(item) for item in shapes if section_id(item)}
+            direct_ids={section_id(item) for item in live if section_id(item)}
+            # TDX 標準允許即時資料以 SectionID 或 LinkIDs 表示路段。
+            # 只有在即時資料無法直接對上線型時，才額外取 SectionLink 對照表。
+            link_to_sections={}
+            if any(extract_link_ids(item.get("LinkIDs") or item.get("LinkID")) for item in live) and not direct_ids.issubset(shape_ids):
+                link_rows=cached_static_rows(f"Road/Traffic/SectionLink/City/{city_code}", bearer, section_cache)
+                link_to_sections=build_link_to_sections(link_rows)
             level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/City/{city_code}", bearer, level_cache)
-            segments = build_segments(live, shapes, region, label, "TDX 縣市即時路況", level_index=build_definition_index(level_groups))
+            diag={}
+            segments = build_segments(live, shapes, region, label, "TDX 縣市即時路況", level_index=build_definition_index(level_groups), link_to_sections=link_to_sections, diagnostics=diag)
             all_segments.extend(segments)
-            stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"unmappedRecords":max(0,len(live)-len(segments)),"mappingRate":round(len(segments)/len(live)*100,1) if live else 0,"ok":True})
-            print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)} unmapped={max(0,len(live)-len(segments))}")
+            stat={**diag,"name":label,"sectionLinkRecords":len(link_to_sections),"mappedSegments":len(segments),
+                  "unmappedRecords":max(0,len(live)-len(segments)),
+                  "mappingRate":round(len(segments)/len(live)*100,1) if live else 0,
+                  "apiResponded":True,"hasLiveData":len(live)>0,"hasMappedRoads":len(segments)>0,"ok":True}
+            stats.append(stat)
+            print(f"[CITY] {label}: live={len(live)} shape={len(shapes)} sectionLink={len(link_to_sections)} mapped={len(segments)} sectionID={diag.get('liveWithSectionID',0)} linkID={diag.get('liveWithLinkIDs',0)} speedMissing={diag.get('skippedNoSpeed',0)} noShape={diag.get('skippedNoShape',0)} noRef={diag.get('skippedNoSectionReference',0)}")
         except Exception as exc:
             stats.append({"name":label,"ok":False,"error":str(exc)[:240]})
             print(f"[WARN] {label}: {exc}",file=sys.stderr)
