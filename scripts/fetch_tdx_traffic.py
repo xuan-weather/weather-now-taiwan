@@ -364,24 +364,53 @@ def build_definition_index(groups):
             index[group_id] = definition
     return index
 
-def official_congestion_status(item, definition):
-    """Resolve published TDX congestion levels; do not infer official classes from speed."""
+def official_congestion_status(item, definition, speed=None):
+    """Use TDX level IDs when present; for Speed-based definitions, apply TDX's published bands."""
     raw_level = item.get("CongestionLevel")
     level_number = None
     try:
         level_number = int(float(raw_level))
     except (TypeError, ValueError):
         pass
+
+    levels = definition.get("levels", []) if isinstance(definition, dict) else []
     level_name = ""
-    if isinstance(definition, dict):
-        for entry in definition.get("levels", []):
+    if level_number is not None:
+        for entry in levels:
             try:
                 entry_level = int(float(entry.get("Level")))
             except (TypeError, ValueError, AttributeError):
                 continue
-            if level_number is not None and entry_level == level_number:
+            if entry_level == level_number:
                 level_name = str(entry.get("LevelName") or "").strip()
                 break
+
+    # TDX Freeway/Highway congestion definitions explicitly use MeasureIndex=Speed.
+    # Some live rows omit CongestionLevel, so resolve the official class from the
+    # matching published LowValue/TopValue range instead of leaving every road unclassified.
+    if not level_name and isinstance(definition, dict) and str(definition.get("measureIndex", "")).lower() == "speed" and speed is not None:
+        try:
+            speed_value_number = float(speed)
+        except (TypeError, ValueError):
+            speed_value_number = None
+        if speed_value_number is not None and speed_value_number >= 0:
+            for entry in levels:
+                try:
+                    level = int(float(entry.get("Level")))
+                    low = float(entry["LowValue"]) if entry.get("LowValue") is not None else None
+                    top = float(entry["TopValue"]) if entry.get("TopValue") is not None else None
+                except (TypeError, ValueError, AttributeError, KeyError):
+                    continue
+                if level <= 0:
+                    continue
+                if low is not None and speed_value_number < low:
+                    continue
+                if top is not None and speed_value_number > top:
+                    continue
+                level_number = level
+                level_name = str(entry.get("LevelName") or "").strip()
+                break
+
     candidate = level_name or str(raw_level or "").strip()
     if "封閉" in candidate or level_number == -1:
         status = "道路封閉"
@@ -417,7 +446,7 @@ def build_segments(live_rows, shape_rows, region, label, source, section_rows=No
         definition = (level_index or {}).get(
             f"{first_text(item,('AuthorityCode','_FeedAuthorityCode'),'')}:{str(item.get('CongestionLevelID','')).strip()}"
         ) or (level_index or {}).get(str(item.get("CongestionLevelID", "")).strip())
-        status, level_number, level_name = official_congestion_status(item, definition)
+        status, level_number, level_name = official_congestion_status(item, definition, speed)
         output.append({
             "id":f"{region}:{sid}",
             "sectionId":sid,
@@ -644,6 +673,7 @@ def main():
     stats=[]
     shape_cache = load_shape_cache()
     level_cache = load_congestion_cache()
+    section_cache = load_supplemental_cache()
     # 即時車速每輪重新抓取；道路線型快取 7 天，官方分級定義快取 24 小時。
     for live_city, shape_city in CITY_PAIRS:
         city_code, label, region = live_city
@@ -663,9 +693,10 @@ def main():
     for category, label, region in (("Highway","全台省道","highway"),("Freeway","全台國道","freeway")):
         try:
             live = rows(f"Road/Traffic/Live/{category}", bearer)
+            sections = cached_static_rows(f"Road/Traffic/Section/{category}", bearer, section_cache)
             shapes = cached_shape_rows(f"Road/Traffic/SectionShape/{category}", bearer, shape_cache)
             level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/{category}", bearer, level_cache)
-            segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況", level_index=build_definition_index(level_groups))
+            segments = build_segments(live, shapes, region, label, f"TDX {label}即時路況", section_rows=sections, level_index=build_definition_index(level_groups))
             all_segments.extend(segments)
             stats.append({"name":label,"liveRecords":len(live),"shapeRecords":len(shapes),"mappedSegments":len(segments),"unmappedRecords":max(0,len(live)-len(segments)),"mappingRate":round(len(segments)/len(live)*100,1) if live else 0,"ok":True})
             print(f"[OK] {label}: live={len(live)} shape={len(shapes)} mapped={len(segments)} unmapped={max(0,len(live)-len(segments))}")
@@ -676,6 +707,7 @@ def main():
         raise SystemExit("No mappable TDX live road sections. Refusing to publish fabricated traffic data.")
     save_shape_cache(shape_cache)
     save_congestion_cache(level_cache)
+    save_supplemental_cache(section_cache)
     fetch_supplemental_layers(bearer)
     generated_at = datetime.now(TW)
     # 以各路段來源提供的觀測時間計算最新官方資料時間；
