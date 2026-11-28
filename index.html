@@ -1540,7 +1540,7 @@
           pbsRows = Array.isArray(payload.records) ? payload.records : [];
           pbsFetchedAt = payload.fetchedAt || null;
           pbsRows.forEach(row => {
-            const roadText = normalizeFreewayName((row.road || '') + ' ' + (row.areaNm || ''));
+            const roadText = normalizeFreewayName(row.road || row.areaNm || '');
             if (!/國道\s*[1-9一二三四五六七八十]/.test(roadText)) return;
             const category = classifyPbsHighwayEvent(row);
             if (!category) return;
@@ -1594,7 +1594,7 @@
         const lane = row.lane ? pbsEscape(row.lane) : '車道資訊未提供';
         const crash = row.category === '車禍';
         const badgeClass = crash ? 'bg-rose-500/15 text-rose-300' : (row.category === '故障車' ? 'bg-amber-500/15 text-amber-300' : 'bg-sky-500/15 text-sky-300');
-        return '<article class="pbs-card"><div class="flex items-start justify-between gap-2"><div class="text-sm font-bold text-white">' + roadName + '</div><span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ' + badgeClass + '">' + category + '</span></div><div class="mt-2 text-sm font-semibold text-slate-100">' + title + '</div><p class="mt-2 text-xs leading-5 text-slate-300 whitespace-pre-wrap">' + desc + '</p><div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400"><span>發生時間：' + pbsEscape(time) + '</span><span>' + lane + '</span><span>來源：' + pbsEscape(row.sourceName || row.source) + '</span></div></article>';
+        return '<article class="pbs-card"><div class="flex items-start justify-between gap-2"><div class="text-sm font-bold text-white">' + roadName + '</div><span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ' + badgeClass + '">' + category + '</span></div><p class="mt-2 text-xs leading-5 text-slate-300 whitespace-pre-wrap">' + desc + '</p><div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400"><span>發生時間：' + pbsEscape(time) + '</span><span>' + lane + '</span><span>來源：' + pbsEscape(row.sourceName || row.source) + '</span></div></article>';
       }).join('');
     }
 
