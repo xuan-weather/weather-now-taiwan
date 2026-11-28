@@ -669,8 +669,8 @@
       layers.traffic.clearLayers();
       Object.keys(polylineMap).forEach(key => delete polylineMap[key]);
 
-      // 中高縮放層級開放路段點擊；全台總覽維持非互動以避免大量線段拖慢手機。
-      const detailMode = map.getZoom() >= 8;
+      // 從一般道路檢視倍率即可點擊；低倍率全台總覽仍關閉互動以維持手機效能。
+      const detailMode = map.getZoom() >= 7;
       const lineWeight = map.getZoom() <= 8 ? 3.5 : (detailMode ? 5 : 4);
 
       roadSegments.forEach(seg => {
@@ -688,7 +688,8 @@
           lineCap: 'round',
           lineJoin: 'round',
           smoothFactor: map.getZoom() <= 8 ? 2.5 : 1.5,
-          interactive: detailMode,
+          // 顯示線本身不承接事件，避免線條太細或被附近圖標遮住。
+          interactive: false,
           bubblingMouseEvents: false
         });
 
@@ -715,19 +716,28 @@
               ${seg._stale ? '<div class="text-[10px] text-slate-300 mt-1">資料超過 30 分鐘或缺少觀測時間，已改以灰色標示，不列入即時壅塞判讀</div>' : ''}
             </div>
           `;
-          line.bindPopup(popupHtml, {
+          // 加寬透明點擊區，手機不必精準點中細線；只在道路檢視倍率建立。
+          const hitLine = L.polyline(seg.coords, {
+            renderer: trafficCanvasRenderer,
+            color: '#ffffff',
+            opacity: 0,
+            weight: Math.max(16, lineWeight + 12),
+            lineCap: 'round',
+            lineJoin: 'round',
+            smoothFactor: 1,
+            interactive: true,
+            bubblingMouseEvents: false
+          });
+          hitLine.bindPopup(popupHtml, {
             closeButton: true,
             autoPan: true,
             maxWidth: 280
           });
-          // 明確處理點擊/手機輕觸，直接開啟該筆路段的官方即時車速資訊。
-          line.on('click', event => {
-            if (event.originalEvent) {
-              event.originalEvent.preventDefault?.();
-              event.originalEvent.stopPropagation?.();
-            }
-            line.openPopup(event.latlng);
+          hitLine.on('click', event => {
+            if (event.originalEvent) event.originalEvent.stopPropagation?.();
+            hitLine.openPopup(event.latlng);
           });
+          hitLine.addTo(layers.traffic);
         }
 
         line.addTo(layers.traffic);
@@ -962,10 +972,10 @@
     }
 
     // 路網只在跨越互動層級時重繪；CCTV 依視野重新群聚，停車場仍採高倍率顯示。
-    let previousTrafficDetailMode = map.getZoom() >= 10;
+    let previousTrafficDetailMode = map.getZoom() >= 7;
     let previousParkingMarkerMode = map.getZoom() >= 11;
     map.on('zoomend', () => {
-      const detailMode = map.getZoom() >= 10;
+      const detailMode = map.getZoom() >= 7;
       const parkingMode = map.getZoom() >= 11;
       if (detailMode !== previousTrafficDetailMode) {
         previousTrafficDetailMode = detailMode;
