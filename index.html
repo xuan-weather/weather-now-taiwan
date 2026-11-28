@@ -31,6 +31,10 @@ height: 100vh;
 z-index: 1;
 background: #0b0f19;
 }
+/* OSM 標準底圖轉為深色夜間風格，僅作用於底圖，不影響 TDX 彩色路況圖層。 */
+.leaflet-tile-pane {
+filter: invert(1) hue-rotate(180deg) brightness(.82) contrast(1.08) saturate(.72);
+}
 
 /* 隱藏預設 Leaflet 縮放控制項（改用自訂懸浮控制） */
 .leaflet-control-zoom {
@@ -161,14 +165,14 @@ opacity: 0;
 套用並關閉
 </button></div></div></div><!-- 系統提示訊息 Toast --><div id="toast-notification" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-opacity duration-300"><div class="bg-slate-900/95 backdrop-blur-md border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded-full shadow-2xl text-xs font-medium flex items-center gap-2"><i class="fa-solid fa-circle-check text-emerald-400"></i><span id="toast-message">已更新至最新路況資料</span></div></div><!-- ==================== JavaScript 核心邏輯：僅顯示官方資料 ==================== --><script>
 const map = L.map('map', {center:[23.7,120.95],zoom:8,zoomControl:false,attributionControl:true,preferCanvas:true});
-// 回復原本 CARTO 深色路網底圖（使用公開 cartocdn 瓦片，不使用需要金鑰的 carto.com API）。
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-attribution:'&copy; OpenStreetMap &copy; CARTO | 即時資料：交通部 TDX',
-subdomains:'abcd',
+// 使用 OpenStreetMap 標準瓦片，避免 CARTO 於 2026 年 9 月起要求 API Key 而出現水印。
+// 僅對底圖瓦片套用深色濾鏡；TDX 路況線、事故標記與 CCTV 圖層不受影響。
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> | 即時資料：交通部 TDX',
 maxZoom:19,
 updateWhenIdle:true,
 updateWhenZooming:false,
-keepBuffer:2
+keepBuffer:1
 }).addTo(map);
 const layers={traffic:L.layerGroup().addTo(map),events:L.layerGroup().addTo(map),cctv:L.layerGroup().addTo(map),cms:L.layerGroup().addTo(map)};
 let activeHighways=new Set(['ALL']);
@@ -187,7 +191,8 @@ all:{center:[23.75,120.95],zoom:8,name:'全台路網'}
 };
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const parseDate=v=>{if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d;};
-function segmentFresh(seg){const speed=Number(seg.speed);const d=parseDate(seg.updateTime);return Number.isFinite(speed)&&speed>0&&speed<=200&&!!d&&(Date.now()-d.getTime())>=-5*60*1000&&(Date.now()-d.getTime())<=30*60*1000;}
+function segmentFresh(seg){const speed=Number(seg.speed);const d=parseDate(seg.updateTime);const age=d?Date.now()-d.getTime():Infinity;return Number.isFinite(speed)&&speed>0&&speed<=200&&!!d&&age>=-5*60*1000&&age<=30*60*1000;}
+function segmentInViewport(seg,bounds){const b=seg._bounds;if(!b)return true;return b[0]<=bounds.getNorth()&&b[2]>=bounds.getSouth()&&b[1]<=bounds.getEast()&&b[3]>=bounds.getWest();}
 function formatTime(v){const d=parseDate(v);return d?d.toLocaleString('zh-TW',{hour12:false}):'時間未提供';}
 function routeMeta(seg){
 const text=`${seg.name||''} ${seg.id||''}`;
@@ -216,13 +221,15 @@ function eventTypeLabel(type){return ({accident:'交通事故',roadwork:'道路�
 function eventStyle(type){if(type==='accident')return ['fa-car-burst','#f43f5e'];if(type==='roadwork')return ['fa-person-digging','#f59e0b'];if(type==='breakdown')return ['fa-triangle-exclamation','#eab308'];if(type==='traffic_control')return ['fa-ban','#38bdf8'];return ['fa-circle-exclamation','#fb923c'];}
 function renderMapObjects(){
 Object.values(layers).forEach(l=>l.clearLayers());
+const viewport=map.getBounds();
 let smooth=0,busy=0,congested=0,stale=0;
 roadSegments.forEach(seg=>{
 if(!Array.isArray(seg.coords)||seg.coords.length<2)return;
 const fresh=segmentFresh(seg),speed=Number(seg.speed),style=getSpeedStyle(speed,fresh);
 if(!fresh)stale++;else if(speed>=80)smooth++;else if(speed>=60)busy++;else congested++;
-if(!passesFilter(seg))return;
-// Canvas 單層繪製：避免每條路段建立兩個 SVG 與發光濾鏡，降低手機重繪負擔。
+if(!passesFilter(seg)||!segmentInViewport(seg,viewport))return;
+// 僅繪製目前視窗附近的路段；全台資料仍保留於清單與篩選中，減少手機同時建立數千條線的負擔。
+// Canvas 單層繪製，避免 SVG 與發光濾鏡造成額外重繪。
 const line=L.polyline(seg.coords,{renderer:map.getRenderer(map),color:style.color,weight:4,opacity:fresh?.92:.55,lineCap:'round',lineJoin:'round',interactive:true}).addTo(layers.traffic);
 line.bindPopup(`<div class="p-3.5"><div class="flex items-center justify-between gap-2 mb-2"><b class="text-xs text-cyan-300">${esc(seg.highwayName)}</b><span class="text-xs">${style.label}</span></div><h4 class="font-bold text-sm mb-2">${esc(seg.name)}</h4><div class="text-sm">車速：<b style="color:${style.color}">${fresh&&Number.isFinite(speed)?Math.round(speed)+' km/h':'待確認'}</b></div><div class="text-xs text-slate-400 mt-1">觀測時間：${esc(formatTime(seg.updateTime))}</div><div class="text-xs text-slate-500 mt-1">來源：${esc(seg.sourceLabel||'交通部 TDX')}</div></div>`);
 seg.leafletLayer=line;
@@ -241,7 +248,8 @@ const marker=L.marker([evt.lat,evt.lng],{icon}).addTo(layers.events);
 marker.bindPopup(`<div class="p-3.5"><span class="text-xs font-bold" style="color:${color}">${eventTypeLabel(evt.type)}</span><h4 class="font-bold text-sm my-2">${esc(evt.title)}</h4><div class="text-xs text-cyan-300">${esc(evt.road||'道路位置未提供')}</div><p class="text-xs text-slate-300 mt-2">${esc(evt.desc||'官方事件資料未提供詳細說明')}</p><div class="text-xs text-slate-400 mt-2">發佈/更新：${esc(formatTime(evt.time))}</div><div class="text-[10px] text-slate-500 mt-1">來源：交通部 TDX 道路事件</div></div>`);
 evt.leafletMarker=marker;
 });
-document.getElementById('data-mode-badge').textContent=`● 官方 TDX 資料｜有效 ${roadSegments.length-stale} 段 / 逾期 ${stale} 段`;
+const citySources=Array.isArray(sourceMeta.sources)?sourceMeta.sources.filter(x=>x.name&&x.name!=='全台省道'&&x.name!=='全台國道'):[],cityOk=citySources.filter(x=>x.ok).length;
+document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${roadSegments.length-stale} / ${roadSegments.length} 段｜縣市來源成功 ${cityOk}/${citySources.length||0}`;
 document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
 renderCctvLayer();
 }
@@ -259,6 +267,8 @@ marker.bindPopup('<div class="p-3"><b class="text-sm">'+esc(cam.name)+'</b><div 
 });
 }
 map.on('zoomend',renderCctvLayer);
+// 拖曳/縮放結束後才重繪可視範圍路段，避免每一個移動影格都觸發大量計算。
+map.on('moveend',()=>{renderMapObjects();renderCctvLayer();});
 function renderDrawerList(){
 const container=document.getElementById('drawer-content');container.innerHTML='';
 if(currentDrawerTab==='congested'){
@@ -294,15 +304,18 @@ if(!trafficRes.ok)throw new Error(`路況資料 HTTP ${trafficRes.status}`);
 const payload=await trafficRes.json();
 if(!Array.isArray(payload.segments)||payload.segments.length===0)throw new Error('官方路況資料尚未產生或目前沒有可用路段');
 roadSegments=payload.segments.filter(s=>Array.isArray(s.coords)&&s.coords.length>=2&&Number.isFinite(Number(s.speed))).map(s=>{
-const meta=routeMeta(s);return {...s,...meta,speed:Number(s.speed),direction:s.direction||'',sourceLabel:s.sourceLabel||payload.source||'交通部 TDX'};
+const meta=routeMeta(s),coords=s.coords;
+let minLat=90,minLng=180,maxLat=-90,maxLng=-180;
+coords.forEach(p=>{if(Array.isArray(p)&&p.length>=2){const lat=Number(p[0]),lng=Number(p[1]);if(Number.isFinite(lat)&&Number.isFinite(lng)){minLat=Math.min(minLat,lat);minLng=Math.min(minLng,lng);maxLat=Math.max(maxLat,lat);maxLng=Math.max(maxLng,lng);}}});
+return {...s,...meta,_bounds:[minLat,minLng,maxLat,maxLng],speed:Number(s.speed),direction:s.direction||'',sourceLabel:s.sourceLabel||payload.source||'交通部 TDX'};
 });
 let layerData={};
 if(layersRes&&layersRes.ok){try{layerData=await layersRes.json();}catch(_){layerData={};}}
 trafficEvents=Array.isArray(layerData.incidents)?layerData.incidents.map(e=>{const crashTitle=/(車禍|追撞|擦撞|自撞|翻覆|碰撞|事故現場|事故處理|事故發生|accident|collision)/i.test(String(e.title||''));const safeType=e.type==='accident'&&!crashTitle?'incident':e.type;return {...e,type:safeType,lat:Number(e.lat),lng:Number(e.lng),location:e.road||'道路位置未提供',lanes:e.lane||'未提供',description:e.desc||'',delay:'未提供'};}):[];
 liveCctv=Array.isArray(layerData.cctv)?layerData.cctv.map(c=>({...c,lat:Number(c.lat),lng:Number(c.lng)})):[];
 sourceMeta=payload;
-const official=payload.officialDataAt||payload.generatedAt;
-document.getElementById('last-update-time').textContent=official?formatTime(official):'時間未提供';
+const official=payload.officialDataAt;
+document.getElementById('last-update-time').textContent=official?formatTime(official):'官方觀測時間未提供';
 lastFetchAt=new Date();
 document.getElementById('countdown-timer').textContent='300s';countdownSeconds=300;
 buildHighwayFilters();renderMapObjects();renderDrawerList();
