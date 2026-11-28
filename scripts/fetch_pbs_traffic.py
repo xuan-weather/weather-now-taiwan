@@ -33,20 +33,26 @@ def normalize_road_text(value):
 
 def parse_milepost_context(text):
     text = normalize_road_text(text)
-    road_match = re.search(r"國道\s*(\d{1,2})(?:號)?", text)
-    # PBS commonly reports decimal kilometre values (e.g. 337.8km),
-    # while other feeds use K+metres (e.g. 337K+800).
-    km_match = re.search(r"(\d{1,3})\s*K\s*\+\s*(\d{1,3})", text, re.I)
+    compact = re.sub(r"\\s+", "", text)
+    road_match = re.search(r"(?:國道|國)\\s*(\\d{1,2})(?:號)?", text)
+    # Support both decimal km (337.8km) and K+metres (337K+800),
+    # including official KML placemark names such as 337K+800.
+    km_match = re.search(r"(\\d{1,3})\\s*K\\s*\\+\\s*(\\d{1,3})", text, re.I)
     if km_match:
         km = int(km_match.group(1)) + int(km_match.group(2)) / 1000
     else:
-        km_match = re.search(r"(\d{1,3})(?:\.(\d{1,3}))?\s*(?:KM|K|公里)", text, re.I)
-        if not road_match or not km_match:
+        km_match = re.search(r"(\\d{1,3})(?:\\.(\\d{1,3}))?\\s*(?:KM|K|公里)", text, re.I)
+        if not km_match:
             return None
         km = int(km_match.group(1)) + float("0." + (km_match.group(2) or "0"))
-    if not road_match or not km_match:
+    if not road_match:
         return None
-    direction = "N" if re.search(r"北上|北向|北行", text) else ("S" if re.search(r"南下|南向|南行", text) else "")
+    # KML metadata may use N/S, 北向/南向, 北上/南下 or directional lane labels.
+    direction = ""
+    if re.search(r"南下|南向|南行|南向線|SOUTHBOUND|\\bS\\b|\\bS-", text, re.I):
+        direction = "S"
+    elif re.search(r"北上|北向|北行|北向線|NORTHBOUND|\\bN\\b|\\bN-", text, re.I):
+        direction = "N"
     if not direction:
         return None
     road_code = road_match.group(1) + ("-high" if re.search(r"高架|汐止楊梅", text) else "")
@@ -64,30 +70,52 @@ def parse_kml_mileposts(raw_zip):
 
     def walk(node, inherited=""):
         tag = node.tag.rsplit("}", 1)[-1]
-        if tag == "Folder":
+        context = inherited
+        if tag in ("Folder", "Document"):
             folder_name = node.find("k:name", ns)
-            inherited = (inherited + " " + (folder_name.text if folder_name is not None and folder_name.text else "")).strip()
+            if folder_name is not None and folder_name.text:
+                context = (context + " " + folder_name.text).strip()
         if tag == "Placemark":
             name = node.findtext("k:name", default="", namespaces=ns)
             desc = node.findtext("k:description", default="", namespaces=ns)
+            # Include ExtendedData and style metadata: some KML exports keep
+            # road/direction attributes outside the visible name/description.
+            metadata = " ".join(
+                (element.text or "")
+                for element in node.findall(".//k:Data/k:value", ns)
+            )
+            metadata += " " + " ".join(
+                (element.text or "")
+                for element in node.findall(".//k:SimpleData", ns)
+            )
+            context_text = " ".join((context, name, desc, metadata))
+            parsed = parse_milepost_context(context_text)
             coord_node = node.find(".//k:Point/k:coordinates", ns)
-            if coord_node is not None and coord_node.text:
-                values = coord_node.text.strip().split(",")
+            if coord_node is None:
+                coord_node = node.find(".//k:coordinates", ns)
+            if parsed and coord_node is not None and coord_node.text:
+                values = coord_node.text.strip().split()[0].split(",")
                 if len(values) >= 2:
                     try:
                         lng, lat = float(values[0]), float(values[1])
-                        parsed = parse_milepost_context(inherited + " " + name + " " + desc)
-                        if parsed and 20 <= lat <= 27 and 118 <= lng <= 123:
+                        if 20 <= lat <= 27 and 118 <= lng <= 123:
                             road, direction, km = parsed
                             points.append({"road": road, "direction": direction, "km": km, "lat": lat, "lng": lng})
                     except (TypeError, ValueError):
                         pass
         for child in list(node):
-            walk(child, inherited)
+            walk(child, context)
 
     walk(root)
     if not points:
         raise ValueError("No direction-specific highway milepost coordinates parsed from official KML")
+    # Avoid duplicate placemarks while preserving distinct carriageways.
+    unique = {}
+    for point in points:
+        key = (point["road"], point["direction"], round(point["km"], 3))
+        unique[key] = point
+    points = list(unique.values())
+    print(f"Parsed {len(points)} direction-specific official highway milepost coordinates")
     return points
 
 
