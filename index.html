@@ -278,7 +278,12 @@ renderCctvLayer();
 }
 function vdIsFresh(device){
 const d=parseDate(device.dataCollectTime),age=d?Date.now()-d.getTime():Infinity;
-return Number(device.status)===0&&age>=-2*60*1000&&age<=5*60*1000&&device.speed!==null&&device.speed!==undefined&&device.speed!==''&&Number.isFinite(Number(device.speed))&&Number(device.speed)>=0&&Number(device.speed)<=200;
+// 即時動態有效性依設備狀態與資料時間判斷；車速缺值不應把已取得的車流量／佔有率誤標成靜態資料。
+return Number(device.status)===0&&age>=-2*60*1000&&age<=5*60*1000;
+}
+function vdHasValidSpeed(device){
+const speed=Number(device.speed);
+return device.speed!==null&&device.speed!==undefined&&device.speed!==''&&Number.isFinite(speed)&&speed>=0&&speed<=200;
 }
 async function refreshVDData(){
 try{
@@ -297,21 +302,22 @@ function renderVDLayer(){
 layers.vd.clearLayers();
 const count=document.getElementById('vd-count-label');
 const freshCount=vdDevices.filter(vdIsFresh).length;
+const speedCount=vdDevices.filter(d=>vdIsFresh(d)&&vdHasValidSpeed(d)).length;
 const snapshotTime=vdMeta.generatedAt?formatTime(vdMeta.generatedAt):'快照時間未提供';
-if(count)count.textContent=vdDevices.length?(vdDevices.length+' 個官方點位・'+freshCount+' 筆即時・更新 '+snapshotTime):'官方 VD 點位資料尚未載入';
+if(count)count.textContent=vdDevices.length?(vdDevices.length+' 個官方點位・'+freshCount+' 筆即時資料／'+speedCount+' 筆有車速・更新 '+snapshotTime):'官方 VD 點位資料尚未載入';
 const toggle=document.getElementById('toggle-vd');
 if(!toggle||!toggle.checked||map.getZoom()<11)return;
 const bounds=map.getBounds();
 const visible=vdDevices.filter(d=>d.lat>=bounds.getSouth()&&d.lat<=bounds.getNorth()&&d.lng>=bounds.getWest()&&d.lng<=bounds.getEast());
 const limit=map.getZoom()>=13?900:450;
 visible.slice(0,limit).forEach(device=>{
-const fresh=vdIsFresh(device),speed=Number(device.speed);
-const color=!fresh?'#94a3b8':speed>=60?'#10b981':speed>=40?'#f59e0b':speed>=20?'#f97316':'#ef4444';
+const fresh=vdIsFresh(device),speed=Number(device.speed),speedValid=vdHasValidSpeed(device);
+const color=!fresh?'#94a3b8':!speedValid?'#64748b':speed>=60?'#10b981':speed>=40?'#f59e0b':speed>=20?'#f97316':'#ef4444';
 const marker=L.circleMarker([device.lat,device.lng],{renderer:map.getRenderer(map),radius:map.getZoom()>=13?6:5,color:'#0f172a',weight:1.2,fillColor:color,fillOpacity:.95}).addTo(layers.vd);
 const volumes=device.vehicleVolumes||{};
 const typeNames={M:'機車',S:'小型車',L:'大型車',T:'聯結車'};
 const vehicleText=device.dataCollectTime?Object.entries(typeNames).map(([key,label])=>label+' '+(Number(volumes[key])||0)).join('・'):'車種流量：未取得';
-const speedText=fresh?Math.round(speed)+' km/h':'尚無有效即時車速';
+const speedText=fresh?(speedValid?Math.round(speed)+' km/h':'官方即時資料未提供有效車速'):'尚無有效即時資料';
 const volumeText=device.volumePerMinute!==null&&device.volumePerMinute!==undefined&&device.volumePerMinute!==''&&Number.isFinite(Number(device.volumePerMinute))?Number(device.volumePerMinute)+' 輛/分鐘':'未提供';
 const occupancyText=device.occupancy!==null&&device.occupancy!==undefined&&device.occupancy!==''&&Number.isFinite(Number(device.occupancy))?device.occupancy+'%':'未提供';
 const statusText=device.status===null||device.status===undefined?'動態資料尚未取得':Number(device.status)===0?'正常':({1:'通訊異常',2:'停用／施工中',3:'設備故障'}[Number(device.status)]||'尚無即時狀態');
