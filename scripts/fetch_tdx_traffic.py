@@ -508,15 +508,22 @@ def fetch_event_records(bearer,authority):
                         loc_text=field_value(v,"Road","RoadName","Description") or loc_text
         description=field_value(impact,"Description") if isinstance(impact,dict) else None
         title=field_value(item,"Description","EventTitle","EventType","Title") or "道路事件"
-        searchable=(str(title)+" "+str(description or "")+" "+str(field_value(item,"EventType","EventTypeCode") or "")).lower()
-        if any(word in searchable for word in ("施工","roadwork","workzone","維護")):
+        event_code=str(field_value(item,"EventID","EventId","EventTypeCode","EventType") or "")
+        searchable=(str(title)+" "+str(description or "")+" "+event_code+" "+str(field_value(item,"Comment","Remark") or "")).lower()
+        if any(word in searchable for word in ("施工","roadwork","workzone","維護")) or event_code.startswith("A150402"):
             event_type="roadwork"
-        elif any(word in searchable for word in ("事故","車禍","accident","collision")):
+        elif any(word in searchable for word in ("事故","車禍","追撞","擦撞","自撞","翻覆","碰撞","accident","collision")):
             event_type="accident"
-        elif any(word in searchable for word in ("故障","breakdown","拋錨")):
+        elif any(word in searchable for word in ("故障車","車輛故障","breakdown","拋錨")):
             event_type="breakdown"
+        elif any(word in searchable for word in ("散落物","掉落物","障礙物","異物","輪胎","鐵條")) or event_code.startswith("A150403"):
+            event_type="obstruction"
+        elif any(word in searchable for word in ("壅塞","阻塞","車多","車流")):
+            event_type="congestion"
+        elif any(word in searchable for word in ("管制","開放路肩","儀控","封閉")) or event_code.startswith("A150401"):
+            event_type="traffic_control"
         else:
-            event_type="incident"
+            event_type="other"
         output.append({
             "id":str(field_value(item,"EventID","EventId","ID") or f"{authority}-{len(output)}"),
             "type":event_type,
