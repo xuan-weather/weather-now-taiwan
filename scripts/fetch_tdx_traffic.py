@@ -977,8 +977,25 @@ def fetch_vd_layer(bearer, static_cache):
     static_sources = [(code, name, "city") for code, name, _region in VD_STATIC_CITIES]
     static_sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
 # VD Live/City 僅接受 VD_STATIC_CITIES 中經官方 HTTP 400 回應確認的代碼；不可沿用一般路況 LIVE_CITIES。
-    live_sources = [(code, name, "city") for code, name, _region in VD_STATIC_CITIES]
-    live_sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
+    # 先抓全國性省道／國道，再優先更新主要都會區；其餘縣市仍全部保留。
+    # 排序只影響 API 請求先後，不刪減官方來源，也不變更設備座標。
+    live_sources = [
+        ("Highway", "全台省道", "highway"),
+        ("Freeway", "全台國道", "freeway"),
+        ("Taipei", "臺北市", "city"),
+        ("Taichung", "臺中市", "city"),
+        ("Tainan", "臺南市", "city"),
+        ("Kaohsiung", "高雄市", "city"),
+        ("Taoyuan", "桃園市", "city"),
+        ("YunlinCounty", "雲林縣", "city"),
+        ("PingtungCounty", "屏東縣", "city"),
+        ("Keelung", "基隆市", "city"),
+        ("HsinchuCounty", "新竹縣", "city"),
+        ("NantouCounty", "南投縣", "city"),
+        ("TaitungCounty", "臺東縣", "city"),
+        ("HualienCounty", "花蓮縣", "city"),
+        ("KinmenCounty", "金門縣", "city")
+    ]
     devices = {}
     stats_by_key = {}
     fetch_started_at = datetime.now(TW)
