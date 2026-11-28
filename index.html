@@ -278,7 +278,7 @@ renderCctvLayer();
 }
 function vdIsFresh(device){
 const d=parseDate(device.dataCollectTime),age=d?Date.now()-d.getTime():Infinity;
-return Number(device.status)===0&&age>=-2*60*1000&&age<=5*60*1000&&Number.isFinite(Number(device.speed))&&Number(device.speed)>=0&&Number(device.speed)<=200;
+return Number(device.status)===0&&age>=-2*60*1000&&age<=5*60*1000&&device.speed!==null&&device.speed!==undefined&&device.speed!==''&&Number.isFinite(Number(device.speed))&&Number(device.speed)>=0&&Number(device.speed)<=200;
 }
 function renderVDLayer(){
 layers.vd.clearLayers();
@@ -299,7 +299,7 @@ const typeNames={M:'機車',S:'小型車',L:'大型車',T:'聯結車'};
 const vehicleText=Object.entries(typeNames).map(([key,label])=>label+' '+(Number(volumes[key])||0)).join('・');
 const speedText=fresh?Math.round(speed)+' km/h':'尚無有效即時車速';
 const volumeText=Number.isFinite(Number(device.volumePerMinute))?Number(device.volumePerMinute)+' 輛/分鐘':'未提供';
-const occupancyText=Number.isFinite(Number(device.occupancy))?device.occupancy+'%':'未提供';
+const occupancyText=device.occupancy!==null&&device.occupancy!==undefined&&device.occupancy!==''&&Number.isFinite(Number(device.occupancy))?device.occupancy+'%':'未提供';
 const statusText=Number(device.status)===0?'正常':({1:'通訊異常',2:'停用／施工中',3:'設備故障'}[Number(device.status)]||'尚無即時狀態');
 const lanes=Number(device.laneCount)||0;
 const popup='<div class="p-3 min-w-52"><div class="flex items-center justify-between gap-2"><b class="text-sm text-cyan-300">'+esc(device.roadName||device.name||'VD 車輛偵測器')+'</b><span class="text-[10px] px-2 py-1 rounded bg-slate-800">'+(fresh?'即時':'待確認')+'</span></div><div class="text-xs text-slate-300 mt-1">'+esc(device.sourceName||'交通部 TDX')+'・'+esc(device.id)+'</div><div class="grid grid-cols-2 gap-2 mt-3"><div class="rounded-lg bg-slate-800 p-2"><div class="text-[10px] text-slate-400">平均車速</div><b class="text-base" style="color:'+color+'">'+esc(speedText)+'</b></div><div class="rounded-lg bg-slate-800 p-2"><div class="text-[10px] text-slate-400">車流量</div><b class="text-sm">'+esc(volumeText)+'</b></div><div class="rounded-lg bg-slate-800 p-2"><div class="text-[10px] text-slate-400">佔有率</div><b class="text-sm">'+esc(occupancyText)+'</b></div><div class="rounded-lg bg-slate-800 p-2"><div class="text-[10px] text-slate-400">偵測車道</div><b class="text-sm">'+(lanes?lanes+' 線':'未提供')+'</b></div></div><div class="text-[11px] text-slate-300 mt-2">'+esc(vehicleText)+'</div><div class="text-[10px] text-slate-400 mt-2">道路方向：'+esc(device.direction||'未提供')+'</div><div class="text-[10px] text-slate-400 mt-1">設備狀態：'+esc(statusText)+'</div><div class="text-[10px] text-slate-400 mt-1">資料蒐集時間：'+esc(formatTime(device.dataCollectTime))+'</div><div class="text-[10px] text-slate-500 mt-1">來源：交通部 TDX VD 動態資料（1 分鐘更新週期）</div></div>';
