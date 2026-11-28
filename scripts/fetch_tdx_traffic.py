@@ -879,6 +879,7 @@ def main():
             "expected":len(LIVE_CITIES),
             "configured":len(CITY_PAIRS),
             "apiResponded":sum(1 for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES} and item.get("ok") is True),
+            "withLiveRecords":sum(1 for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES} and item.get("liveRecords",0)>0),
             "successful":sum(1 for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES} and item.get("ok") is True and item.get("mappedSegments",0)>0),
             "cities":[
                 {
