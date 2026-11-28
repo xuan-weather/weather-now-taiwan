@@ -1094,7 +1094,7 @@ def fetch_vd_layer(bearer, static_cache):
 
     static_fetch_seconds = round(time.monotonic() - static_started_at, 2)
     live_started_at = time.monotonic()
-    live_fetch_budget_seconds = 210
+    live_fetch_budget_seconds = 150
     primary_live_codes = {"Highway", "Freeway", "Taipei", "Taichung", "Tainan", "Kaohsiung", "Taoyuan"}
     for code, label, source_type in live_sources:
         source_started_at = time.monotonic()
@@ -1250,12 +1250,14 @@ def fetch_vd_layer(bearer, static_cache):
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     bearer=token()
-    if mode == "--vd-only":
+    if mode in ("--vd-only", "--combined"):
         vd_static_cache = load_supplemental_cache(VD_STATIC_CACHE_PATH)
         fetch_vd_layer(bearer, vd_static_cache)
         save_supplemental_cache(vd_static_cache, VD_STATIC_CACHE_PATH)
-        print("[VD] Independent VD refresh completed.")
-        return
+        if mode == "--vd-only":
+            print("[VD] Independent VD refresh completed.")
+            return
+        print("[VD] Priority refresh completed; continuing with nationwide road traffic.")
     all_segments=[]
     stats=[]
     shape_cache = load_shape_cache()
@@ -1315,14 +1317,14 @@ def main():
     save_shape_cache(shape_cache)
     save_congestion_cache(level_cache)
     save_supplemental_cache(section_cache)
-    if mode not in ("--skip-vd", "--traffic-only"):
+    if mode not in ("--skip-vd", "--traffic-only", "--combined"):
         vd_static_cache = load_supplemental_cache(VD_STATIC_CACHE_PATH)
         fetch_vd_layer(bearer, vd_static_cache)
         save_supplemental_cache(vd_static_cache, VD_STATIC_CACHE_PATH)
-    if mode != "--traffic-only":
+    if mode not in ("--traffic-only", "--combined"):
         fetch_supplemental_layers(bearer)
     else:
-        print("[TRAFFIC] Skip VD and supplementary layers; they are refreshed by independent workflows.")
+        print("[TRAFFIC] Skip duplicate VD and supplementary requests in the combined five-minute refresh.")
     generated_at = datetime.now(TW)
     # 以各路段來源提供的觀測時間計算最新官方資料時間；
     # generatedAt 則保留為本次 JSON 快照產生時間，兩者不可混用。
