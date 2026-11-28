@@ -838,6 +838,11 @@ def summarize_vd_live(live):
                 volume = number_or_none(vehicle.get("Volume"), 0, 1000000)
                 if vehicle_type in vehicle_volumes and volume is not None:
                     vehicle_volumes[vehicle_type] += int(volume)
+    raw_status = live.get("Status")
+    try:
+        status = int(raw_status) if raw_status is not None and str(raw_status).strip() != "" else None
+    except (TypeError, ValueError):
+        status = None
     return {
         "linkIds": link_ids,
         "laneCount": lane_count,
@@ -845,7 +850,7 @@ def summarize_vd_live(live):
         "occupancy": round(sum(occupancies) / len(occupancies), 1) if occupancies else None,
         "volumePerMinute": sum(vehicle_volumes.values()),
         "vehicleVolumes": vehicle_volumes,
-        "status": live.get("Status"),
+        "status": status,
         "dataCollectTime": live.get("DataCollectTime") or live.get("UpdateTime") or ""
     }
 
@@ -957,10 +962,19 @@ def fetch_vd_layer(bearer, static_cache):
 
         stats.append(source_stat)
 
-    live_devices = sum(
-        1 for device in devices.values()
-        if device.get("status") == 0 and device.get("dataCollectTime")
-    )
+    live_devices = 0
+    for device in devices.values():
+        if device.get("status") != 0 or not device.get("dataCollectTime") or device.get("speed") is None:
+            continue
+        try:
+            collected = datetime.fromisoformat(str(device["dataCollectTime"]).replace("Z", "+00:00"))
+            if collected.tzinfo is None:
+                collected = collected.replace(tzinfo=TW)
+            age = (now - collected.astimezone(TW)).total_seconds()
+            if -120 <= age <= 300:
+                live_devices += 1
+        except (TypeError, ValueError):
+            continue
     payload = {
         "source": "交通部 TDX 路況資訊 v2 VD 官方靜態設備位置及批次即時動態資料",
         "generatedAt": now.isoformat(timespec="seconds"),
