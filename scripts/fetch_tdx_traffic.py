@@ -834,6 +834,7 @@ def number_or_none(value, minimum=None, maximum=None):
 def summarize_vd_live(live):
     link_ids = []
     lane_speeds = []
+    vehicle_speeds = []
     occupancies = []
     lane_count = 0
     vehicle_volumes = {"M": 0, "S": 0, "L": 0, "T": 0}
@@ -843,26 +844,53 @@ def summarize_vd_live(live):
             link_ids.append(link_id)
         for lane in collection_items(link.get("Lanes"), "Lane"):
             lane_count += 1
-            speed = number_or_none(lane.get("Speed"), 0, 200)
-            occupancy = number_or_none(lane.get("Occupancy"), 0, 100)
+            # TDX 標準車道平均速率欄位為 Lane.Speed（km/h）。
+            # 同時兼容大小寫及部分來源使用的 LaneSpeed 命名。
+            raw_lane_speed = lane.get("Speed")
+            if raw_lane_speed is None:
+                raw_lane_speed = lane.get("LaneSpeed", lane.get("speed"))
+            speed = number_or_none(raw_lane_speed, 0, 200)
+            occupancy = number_or_none(lane.get("Occupancy", lane.get("occupancy")), 0, 100)
             if speed is not None:
                 lane_speeds.append(speed)
             if occupancy is not None:
                 occupancies.append(occupancy)
             for vehicle in collection_items(lane.get("Vehicles"), "Vehicle"):
-                vehicle_type = str(vehicle.get("VehicleType") or "").upper()
-                volume = number_or_none(vehicle.get("Volume"), 0, 1000000)
+                vehicle_type = str(vehicle.get("VehicleType") or vehicle.get("vehicleType") or "").upper()
+                volume = number_or_none(vehicle.get("Volume", vehicle.get("volume")), 0, 1000000)
                 if vehicle_type in vehicle_volumes and volume is not None:
                     vehicle_volumes[vehicle_type] += int(volume)
+                # 部分 TDX VD 回應在 Vehicle 層提供車種平均速率；
+                # 僅在 Lane.Speed 全部缺值／異常時作為官方資料備援，不自行估算。
+                raw_vehicle_speed = vehicle.get("Speed")
+                if raw_vehicle_speed is None:
+                    raw_vehicle_speed = vehicle.get("VehicleSpeed", vehicle.get("speed"))
+                vehicle_speed = number_or_none(raw_vehicle_speed, 0, 200)
+                if vehicle_speed is not None:
+                    weight = volume if volume is not None and volume > 0 else 1
+                    vehicle_speeds.append((vehicle_speed, weight))
     raw_status = live.get("Status")
     try:
         status = int(raw_status) if raw_status is not None and str(raw_status).strip() != "" else None
     except (TypeError, ValueError):
         status = None
+    if lane_speeds:
+        speed = round(sum(lane_speeds) / len(lane_speeds), 1)
+        speed_source = "Lane.Speed"
+    elif vehicle_speeds:
+        total_weight = sum(weight for _value, weight in vehicle_speeds)
+        speed = round(sum(value * weight for value, weight in vehicle_speeds) / total_weight, 1)
+        speed_source = "Vehicle.Speed"
+    else:
+        speed = None
+        speed_source = "unavailable"
     return {
         "linkIds": link_ids,
         "laneCount": lane_count,
-        "speed": round(sum(lane_speeds) / len(lane_speeds), 1) if lane_speeds else None,
+        "speed": speed,
+        "speedSource": speed_source,
+        "validLaneSpeedCount": len(lane_speeds),
+        "validVehicleSpeedCount": len(vehicle_speeds),
         "occupancy": round(sum(occupancies) / len(occupancies), 1) if occupancies else None,
         "volumePerMinute": sum(vehicle_volumes.values()),
         "vehicleVolumes": vehicle_volumes,
