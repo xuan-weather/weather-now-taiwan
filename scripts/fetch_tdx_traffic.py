@@ -1006,9 +1006,9 @@ def main():
     save_shape_cache(shape_cache)
     save_congestion_cache(level_cache)
     save_supplemental_cache(section_cache)
-    fetch_supplemental_layers(bearer)
     fetch_vd_layer(bearer, section_cache)
     save_supplemental_cache(section_cache)
+    fetch_supplemental_layers(bearer)
     generated_at = datetime.now(TW)
     # 以各路段來源提供的觀測時間計算最新官方資料時間；
     # generatedAt 則保留為本次 JSON 快照產生時間，兩者不可混用。
