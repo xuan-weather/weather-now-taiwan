@@ -1048,11 +1048,15 @@
         rows.forEach(row => {
           const roadText = String(row.road || row.areaNm || '');
           const sourceText = String(row.srcdetail || '');
-          if (!/國道/.test(roadText) || !/高速公路局|國道.*交控中心/.test(sourceText)) return;
+          if (!/國道/.test(roadText)) return;
           const text = roadText + ' ' + String(row.comment || '') + ' ' + String(row.roadtype || '');
           if (/排除|已恢復正常/.test(text)) return;
           const rawType = String(row.roadtype || '');
-          let type = /事故|車禍|追撞|擦撞|翻覆|碰撞/.test(rawType + ' ' + text) ? 'accident'
+          const isCrash = /事故|車禍|追撞|擦撞|翻覆|碰撞/.test(rawType + ' ' + text);
+          // The official PBS feed sometimes leaves srcdetail blank; a national-highway
+          // crash with valid coordinates is still an official PBS record and must show.
+          if (!/高速公路局|國道.*交控中心/.test(sourceText) && !isCrash) return;
+          let type = isCrash ? 'accident'
             : (/道路施工|施工/.test(rawType + ' ' + text) ? 'roadwork'
             : (/故障車|故障車輛|拋錨/.test(text) ? 'breakdown'
             : (/交通障礙|散落物|掉落物|障礙物/.test(rawType + ' ' + text) ? 'obstruction'
