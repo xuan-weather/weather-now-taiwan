@@ -1,4 +1,4 @@
-name: Update Nationwide TDX Traffic
+name: Update Nationwide TDX Road and VD Traffic
 on:
   workflow_dispatch:
   schedule:
@@ -22,11 +22,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fetch nationwide official TDX traffic
+      - name: Fetch prioritized VD and nationwide official road traffic
         env:
           TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
           TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
-        run: python scripts/fetch_tdx_traffic.py --traffic-only
+        run: python scripts/fetch_tdx_traffic.py --combined
       - name: Commit refreshed traffic JSON
         run: |
           set -euo pipefail
