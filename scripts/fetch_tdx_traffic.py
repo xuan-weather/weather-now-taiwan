@@ -61,6 +61,22 @@ SHAPE_CITIES = [
     ("Tainan","臺南市","tainan"),
     ("Taoyuan","桃園市","taoyuan")
 ]
+# 由 TDX VD/City 端點實際 HTTP 400 回應列出的有效縣市代碼確認。
+VD_STATIC_CITIES = [
+    ("HsinchuCounty","新竹縣","hsinchu_county"),
+    ("NantouCounty","南投縣","nantou"),
+    ("YunlinCounty","雲林縣","yunlin"),
+    ("PingtungCounty","屏東縣","pingtung"),
+    ("TaitungCounty","臺東縣","taitung"),
+    ("HualienCounty","花蓮縣","hualien"),
+    ("Keelung","基隆市","keelung"),
+    ("Taipei","臺北市","taipei"),
+    ("Kaohsiung","高雄市","kaohsiung"),
+    ("Taichung","臺中市","taichung"),
+    ("Tainan","臺南市","tainan"),
+    ("Taoyuan","桃園市","taoyuan"),
+    ("KinmenCounty","金門縣","kinmen")
+]
 LIVE_BY_CODE = {item[0]: item for item in LIVE_CITIES}
 SHAPE_BY_CODE = {item[0]: item for item in SHAPE_CITIES}
 CITY_PAIRS = [(LIVE_BY_CODE[code], SHAPE_BY_CODE[code]) for code in LIVE_BY_CODE if code in SHAPE_BY_CODE]
@@ -131,7 +147,7 @@ def extract_items(payload):
         error = payload.get("error") or {}
         raise RuntimeError(f"TDX returned {error.get('message') or error or 'success=false'}")
     # TDX 路況資料常以 LiveTrafficList/LiveTraffic、SectionShapeList/SectionShapes 包裝。
-    preferred = ("LiveTraffic", "LiveEvent", "RoadEvent", "VDLives", "VDLive", "VDLiveList", "VDs", "VD", "VDList", "CCTV", "ParkingAvailability", "ParkingLot", "SectionShape", "LiveTraffics", "LiveEvents", "RoadEventList", "LiveEventList", "CCTVList", "ParkingAvailabilityList", "ParkingLotList", "SectionShapes", "value", "data", "Data")
+    preferred = ("LiveTraffic", "LiveEvent", "RoadEvent", "CCTV", "ParkingAvailability", "ParkingLot", "SectionShape", "LiveTraffics", "LiveEvents", "RoadEventList", "LiveEventList", "CCTVList", "ParkingAvailabilityList", "ParkingLotList", "SectionShapes", "value", "data", "Data")
     for key in preferred:
         if key in payload:
             found = extract_items(payload[key])
@@ -856,27 +872,28 @@ def summarize_vd_live(live):
 
 
 def fetch_vd_layer(bearer, static_cache):
-    """Fetch official static VD positions and bulk live VD observations from TDX."""
-    static_sources = [(code, name, "city") for code, name, _region in ALL_TAIWAN_CITIES]
+    """Fetch official VD static positions and bulk one-minute live observations."""
+    static_sources = [(code, name, "city") for code, name, _region in VD_STATIC_CITIES]
     static_sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
-    live_city_codes = {code for code, _name, _region in LIVE_CITIES}
-    sources_by_key = {}
+    live_sources = [(code, name, "city") for code, name, _region in LIVE_CITIES]
+    live_sources.extend([("Highway", "全台省道", "highway"), ("Freeway", "全台國道", "freeway")])
     devices = {}
-    stats = []
+    stats_by_key = {}
     now = datetime.now(TW)
 
     for code, label, source_type in static_sources:
+        source_key = (source_type, code)
         key_prefix = f"{source_type}:{code}:"
-        static_path = f"Road/Traffic/VD/{'City/' if source_type == 'city' else ''}{code}"
-        source_stat = {
+        stat = stats_by_key.setdefault(source_key, {
             "code": code, "name": label, "type": source_type,
             "staticRecords": 0, "validDevices": 0,
             "liveRecords": 0, "matchedLive": 0,
             "staticOK": False, "liveOK": False
-        }
+        })
+        static_path = f"Road/Traffic/VD/{'City/' if source_type == 'city' else ''}{code}"
         try:
             static_rows = cached_static_rows(static_path, bearer, static_cache)
-            source_stat["staticRecords"] = len(static_rows)
+            stat["staticRecords"] = len(static_rows)
             for item in static_rows:
                 if not isinstance(item, dict):
                     continue
@@ -884,9 +901,8 @@ def fetch_vd_layer(bearer, static_cache):
                 point = coordinates(item)
                 if not vd_id or not point:
                     continue
-                device_key = key_prefix + vd_id
                 links = collection_items(item.get("DetectionLinks"), "DetectionLink")
-                devices[device_key] = {
+                devices[key_prefix + vd_id] = {
                     "id": vd_id,
                     "sourceType": source_type,
                     "sourceCode": code,
@@ -912,55 +928,45 @@ def fetch_vd_layer(bearer, static_cache):
                             "laneNum": link.get("LaneNum")
                         }
                         for link in links
-                    ],
-                    "status": None,
-                    "speed": None,
-                    "occupancy": None,
-                    "volumePerMinute": None,
-                    "vehicleVolumes": None,
-                    "laneCount": None,
-                    "dataCollectTime": ""
+                    ]
                 }
-            source_stat["validDevices"] = sum(1 for key in devices if key.startswith(key_prefix))
-            source_stat["staticOK"] = True
-            print(f"[VD STATIC] {label}: records={len(static_rows)} mapped={source_stat['validDevices']}")
+            stat["validDevices"] = sum(1 for key in devices if key.startswith(key_prefix))
+            stat["staticOK"] = True
+            print(f"[VD STATIC] {label}: records={stat['staticRecords']} mapped={stat['validDevices']}")
         except Exception as exc:
-            source_stat["staticError"] = str(exc)[:220]
+            stat["staticError"] = str(exc)[:220]
             print(f"[VD STATIC WARN] {label}: {exc}", file=sys.stderr)
 
-        # TDX publishes one bulk live feed per supported city/highway/freeway,
-        # not one HTTP request per detector.
-        live_supported = source_type != "city" or code in live_city_codes
-        source_stat["liveSupported"] = live_supported
-        if live_supported:
-            live_path = (
-                f"Road/Traffic/Live/VD/City/{code}"
-                if source_type == "city"
-                else f"Road/Traffic/Live/VD/{code}"
-            )
-            try:
-                live_rows = rows(live_path, bearer)
-                source_stat["liveRecords"] = len(live_rows)
-                matched = 0
-                for live in live_rows:
-                    if not isinstance(live, dict):
-                        continue
-                    vd_id = str(live.get("VDID") or "").strip()
-                    device_key = key_prefix + vd_id
-                    device = devices.get(device_key)
-                    if not vd_id or device is None:
-                        continue
-                    values = summarize_vd_live(live)
-                    device.update(values)
-                    matched += 1
-                source_stat["matchedLive"] = matched
-                source_stat["liveOK"] = True
-                print(f"[VD LIVE] {label}: live={len(live_rows)} matched={matched}")
-            except Exception as exc:
-                source_stat["liveError"] = str(exc)[:220]
-                print(f"[VD LIVE WARN] {label}: {exc}", file=sys.stderr)
-
-        stats.append(source_stat)
+    for code, label, source_type in live_sources:
+        source_key = (source_type, code)
+        key_prefix = f"{source_type}:{code}:"
+        stat = stats_by_key.setdefault(source_key, {
+            "code": code, "name": label, "type": source_type,
+            "staticRecords": 0, "validDevices": 0,
+            "liveRecords": 0, "matchedLive": 0,
+            "staticOK": False, "liveOK": False
+        })
+        live_path = f"Road/Traffic/Live/VD/{'City/' if source_type == 'city' else ''}{code}"
+        try:
+            live_rows = rows(live_path, bearer)
+            stat["liveRecords"] = len(live_rows)
+            matched = 0
+            for live in live_rows:
+                if not isinstance(live, dict):
+                    continue
+                vd_id = str(live.get("VDID") or "").strip()
+                device = devices.get(key_prefix + vd_id)
+                if not vd_id or device is None:
+                    continue
+                values = summarize_vd_live(live)
+                device.update(values)
+                matched += 1
+            stat["matchedLive"] = matched
+            stat["liveOK"] = True
+            print(f"[VD LIVE] {label}: live={len(live_rows)} matched={matched}")
+        except Exception as exc:
+            stat["liveError"] = str(exc)[:220]
+            print(f"[VD LIVE WARN] {label}: {exc}", file=sys.stderr)
 
     live_devices = 0
     for device in devices.values():
@@ -975,20 +981,21 @@ def fetch_vd_layer(bearer, static_cache):
                 live_devices += 1
         except (TypeError, ValueError):
             continue
+
     payload = {
-        "source": "交通部 TDX 路況資訊 v2 VD 官方靜態設備位置及批次即時動態資料",
+        "source": "交通部 TDX 路況資訊 v2 VD 官方靜態設備位置及 1 分鐘即時動態資料",
         "generatedAt": now.isoformat(timespec="seconds"),
         "updateIntervalSeconds": 60,
         "totalDevices": len(devices),
         "liveDevices": live_devices,
-        "liveDataStatus": "批次動態資料已查詢；僅成功配對且時間有效的設備可視為即時",
-        "sources": stats,
+        "liveDataStatus": "僅成功配對、設備正常且觀測時間在 5 分鐘內的資料視為即時",
+        "sources": list(stats_by_key.values()),
         "devices": list(devices.values())
     }
     os.makedirs("data", exist_ok=True)
     with open("data/tdx-vd.json", "w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, separators=(",", ":"))
-    print(f"[VD] saved {len(devices)} official detector locations; live matched={live_devices}.")
+    print(f"[VD] saved {len(devices)} official detector locations; fresh live={live_devices}.")
 
 def main():
     bearer=token()
