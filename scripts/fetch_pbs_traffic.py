@@ -51,12 +51,12 @@ def count_records(payload):
 def fetch_payload():
     prefer_ipv4()
     retry = Retry(
-        total=6,
-        connect=6,
-        read=4,
-        status=5,
-        backoff_factor=3,
-        backoff_max=45,
+        total=3,
+        connect=3,
+        read=2,
+        status=3,
+        backoff_factor=2,
+        backoff_max=20,
         status_forcelist=(408, 429, 500, 502, 503, 504),
         allowed_methods=frozenset(["GET"]),
         respect_retry_after_header=True,
@@ -71,9 +71,9 @@ def fetch_payload():
     })
 
     last_error = None
-    for attempt in range(1, 4):
+    for attempt in range(1, 3):
         try:
-            response = session.get(URL, timeout=(25, 75))
+            response = session.get(URL, timeout=(15, 45))
             response.raise_for_status()
             payload = response.json()
             count = count_records(payload)
@@ -82,9 +82,9 @@ def fetch_payload():
             return payload, count
         except (requests.RequestException, ValueError) as exc:
             last_error = exc
-            print(f"[PBS RETRY] attempt {attempt}/3 failed: {type(exc).__name__}: {exc}")
-            if attempt < 3:
-                time.sleep(min(15 * attempt, 45))
+            print(f"[PBS RETRY] attempt {attempt}/2 failed: {type(exc).__name__}: {exc}")
+            if attempt < 2:
+                time.sleep(10)
     raise RuntimeError(f"PBS official endpoint unavailable after retries: {last_error}") from last_error
 
 
