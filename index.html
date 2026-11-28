@@ -190,7 +190,7 @@ central:{center:[24.16,120.64],zoom:10,name:'中部路網'},
 all:{center:[23.75,120.95],zoom:8,name:'全台路網'}
 };
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const parseDate=v=>{if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d;};
+const parseDate=v=>{if(!v)return null;let s=String(v).trim();if(/^\\d{4}[-/]\\d{2}[-/]\\d{2}[ T]\\d/.test(s))s=s.replace(/\\//g,'-').replace(' ','T');const d=new Date(s);return Number.isNaN(d.getTime())?null:d;};
 function segmentFresh(seg){const speed=Number(seg.speed);const d=parseDate(seg.updateTime);const age=d?Date.now()-d.getTime():Infinity;return Number.isFinite(speed)&&speed>=0&&speed<=200&&!!d&&age>=-5*60*1000&&age<=30*60*1000;}
 function segmentInViewport(seg,bounds){const b=seg._bounds;if(!b)return true;return b[0]<=bounds.getNorth()&&b[2]>=bounds.getSouth()&&b[1]<=bounds.getEast()&&b[3]>=bounds.getWest();}
 function formatTime(v){const d=parseDate(v);return d?d.toLocaleString('zh-TW',{hour12:false}):'時間未提供';}
@@ -215,7 +215,7 @@ const styles={
 '道路封閉':{color:'#dc2626',glow:'glow-red',label:'道路封閉',badgeBg:'bg-rose-500/20 text-rose-300 border-rose-500/50'},
 '資料不足':{color:'#64748b',glow:'',label:'官方資料不足',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'}
 };
-return styles[status]||{color:'#94a3b8',glow:'',label:'官方分級待確認',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'};
+return styles[status]||{color:'#64748b',glow:'',label:'官方分級待確認',badgeBg:'bg-slate-500/20 text-slate-300 border-slate-500/40'};
 }
 function passesFilter(item){return activeHighways.has('ALL')||activeHighways.has(item.highway)||activeHighways.has(item.category);}
 function buildHighwayFilters(){
@@ -228,11 +228,17 @@ function eventStyle(type){if(type==='accident')return ['fa-car-burst','#f43f5e']
 function renderMapObjects(){
 Object.values(layers).forEach(l=>l.clearLayers());
 const viewport=map.getBounds();
-let smooth=0,busy=0,congested=0,stale=0;
+let smooth=0,busy=0,congested=0,stale=0,freshCount=0,unclassified=0;
 roadSegments.forEach(seg=>{
 if(!Array.isArray(seg.coords)||seg.coords.length<2)return;
 const fresh=segmentFresh(seg),speed=Number(seg.speed),style=getTrafficStyle(seg,fresh);
-if(!fresh)stale++;else if(seg.congestionStatus==='順暢')smooth++;else if(seg.congestionStatus==='車多')busy++;else if(['壅塞','嚴重壅塞','極度壅塞','道路封閉'].includes(seg.congestionStatus))congested++;else stale++;
+if(!fresh)stale++;else{
+freshCount++;
+if(seg.congestionStatus==='順暢')smooth++;
+else if(seg.congestionStatus==='車多')busy++;
+else if(['壅塞','嚴重壅塞','極度壅塞','道路封閉'].includes(seg.congestionStatus))congested++;
+else unclassified++;
+}
 const zoom=map.getZoom();
 if(!passesFilter(seg)||!segmentInViewport(seg,viewport))return;
 // 全台總覽先顯示國道、省道；縣市道路放大至第 10 級才加入，避免低縮放時數千條市區道路擠在一起。
@@ -258,7 +264,7 @@ marker.bindPopup(`<div class="p-3.5"><span class="text-xs font-bold" style="colo
 evt.leafletMarker=marker;
 });
 const citySources=Array.isArray(sourceMeta.sources)?sourceMeta.sources.filter(x=>x.name&&x.name!=='全台省道'&&x.name!=='全台國道'):[],cityOk=citySources.filter(x=>x.ok).length;
-document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${roadSegments.length-stale} / ${roadSegments.length} 段｜縣市來源成功 ${cityOk}/${citySources.length||0}`;
+document.getElementById('data-mode-badge').textContent=`● TDX 官方資料｜有效 ${freshCount} / ${roadSegments.length} 段｜分級待確認 ${unclassified}｜縣市來源成功 ${cityOk}/${citySources.length||0}`;
 document.getElementById('data-mode-badge').className='text-emerald-400 font-medium';
 renderCctvLayer();
 }
