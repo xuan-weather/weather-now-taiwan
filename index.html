@@ -273,13 +273,13 @@
         <header class="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-slate-900/95">
           <button type="button" onclick="closeHighwayAccidents()" class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/15 flex items-center justify-center" aria-label="返回即時路況地圖">←</button>
           <div class="min-w-0 flex-1">
-            <div class="font-bold text-base">🚨 國道車禍查詢</div>
+            <div class="font-bold text-base">🚨 國道車禍／異常事件查詢</div>
             <div id="highway-accident-meta" class="text-[11px] text-slate-400">正在載入 TDX 國道事件資料…</div>
           </div>
           <button type="button" onclick="loadHighwayAccidents(true)" class="px-3 py-2 rounded-xl bg-sky-500 text-white text-xs font-semibold">重新整理</button>
         </header>
         <div class="p-3 border-b border-white/10 grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-2">
-          <input id="highway-accident-search" type="search" placeholder="搜尋國道、里程、方向或事故內容…" oninput="renderHighwayAccidents()" class="w-full rounded-xl bg-slate-800 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-400 outline-none focus:border-sky-400">
+          <input id="highway-accident-search" type="search" placeholder="搜尋國道、里程、方向、車禍或道路異常…" oninput="renderHighwayAccidents()" class="w-full rounded-xl bg-slate-800 border border-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-400 outline-none focus:border-sky-400">
           <select id="highway-accident-road" onchange="renderHighwayAccidents()" class="rounded-xl bg-slate-800 border border-white/10 px-3 py-2.5 text-sm text-white">
             <option value="all">全部國道</option><option value="國道一號">國道一號</option><option value="國道三號">國道三號</option><option value="國道五號">國道五號</option><option value="國道二號">國道二號</option><option value="國道四號">國道四號</option><option value="國道六號">國道六號</option><option value="國道八號">國道八號</option><option value="國道十號">國道十號</option>
           </select>
@@ -287,7 +287,7 @@
         <div id="highway-accident-list" class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2">
           <div class="rounded-xl bg-slate-800 p-4 text-sm text-slate-300">正在載入國道事故資料…</div>
         </div>
-        <footer class="px-4 py-2 border-t border-white/10 text-[10px] text-slate-400">資料來源：交通部 TDX 國道即時事件資料。僅顯示官方資料中可辨識的車禍／事故事件，不將施工、開放路肩或一般散落物誤列為車禍。</footer>
+        <footer class="px-4 py-2 border-t border-white/10 text-[10px] text-slate-400">資料來源：交通部 TDX 國道即時事件資料。資料來源：交通部 TDX 國道即時事件資料。車禍與道路異常分開標示；施工及機動開放路肩不列入事故。</footer>
       </div>
     </section>
 
@@ -1499,11 +1499,14 @@
           const authority = String(row.authority || '').toLowerCase();
           const text = String((row.title || '') + ' ' + (row.desc || ''));
           const isFreeway = authority === 'freeway' || /國道[一二三四五六七八十0-9]+號/.test(road);
-          const isAccident = /車禍|追撞|自撞|翻覆|碰撞|事故現場|事故處理|故障車|車輛故障|拋錨|人員受傷|傷亡/.test(text);
-          return isFreeway && row.type !== 'roadwork' && isAccident;
+          const isShoulderOperation = /機動開放路肩|開放路肩/.test(text);
+          const isAccidentOrHazard = /車禍|追撞|自撞|翻覆|碰撞|事故現場|事故處理|故障車|車輛故障|拋錨|人員受傷|傷亡|散落物|掉落物|障礙物|路面異物|異常告警/.test(text);
+          return isFreeway && row.type !== 'roadwork' && !isShoulderOperation && isAccidentOrHazard;
         }).sort((a,b) => new Date(b.time || 0) - new Date(a.time || 0));
         highwayAccidentFetchedAt = payload.generatedAt || null;
-        meta.textContent = '官方國道事件 ' + rows.filter(row => String(row.authority || '').toLowerCase() === 'freeway').length.toLocaleString('zh-TW') + ' 筆｜符合車禍條件 ' + highwayAccidentRecords.length.toLocaleString('zh-TW') + ' 件' + (highwayAccidentFetchedAt ? '｜同步 ' + new Date(highwayAccidentFetchedAt).toLocaleString('zh-TW') : '');
+        const freewayRows = rows.filter(row => String(row.authority || '').toLowerCase() === 'freeway');
+        const crashCount = freewayRows.filter(row => row.type !== 'roadwork' && /車禍|追撞|自撞|翻覆|碰撞|事故現場|事故處理|故障車|車輛故障|拋錨|人員受傷|傷亡/.test(String((row.title || '') + ' ' + (row.desc || ''))) && !/機動開放路肩|開放路肩/.test(String((row.title || '') + ' ' + (row.desc || '')))).length;
+        meta.textContent = '官方國道事件 ' + freewayRows.length.toLocaleString('zh-TW') + ' 筆｜車禍 ' + crashCount.toLocaleString('zh-TW') + ' 件｜道路異常 ' + highwayAccidentRecords.length.toLocaleString('zh-TW') + ' 件' + (highwayAccidentFetchedAt ? '｜同步 ' + new Date(highwayAccidentFetchedAt).toLocaleString('zh-TW') : '');
         renderHighwayAccidents();
       } catch (error) {
         meta.textContent = '國道事故資料暫時無法載入';
@@ -1534,7 +1537,10 @@
         const time = row.time ? new Date(row.time).toLocaleString('zh-TW', {hour12:false}) : '時間未提供';
         const direction = /北向|南向|東向|西向/.exec(String(row.title || row.desc || ''))?.[0] || '方向未提供';
         const lane = row.lane ? pbsEscape(row.lane) : '車道資訊未提供';
-        return '<article class="pbs-card"><div class="flex items-start justify-between gap-2"><div class="text-sm font-bold text-white">' + roadName + '｜' + pbsEscape(direction) + '</div><span class="shrink-0 rounded-full bg-rose-500/15 px-2 py-1 text-[10px] font-semibold text-rose-300">車禍／事故</span></div><div class="mt-2 text-sm font-semibold text-slate-100">' + title + '</div><p class="mt-2 text-xs leading-5 text-slate-300 whitespace-pre-wrap">' + desc + '</p><div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400"><span>發生時間：' + pbsEscape(time) + '</span><span>' + lane + '</span></div></article>';
+        const isCrash = /車禍|追撞|自撞|翻覆|碰撞|事故現場|事故處理|故障車|車輛故障|拋錨|人員受傷|傷亡/.test(String((row.title || '') + ' ' + (row.desc || '')));
+        const eventLabel = isCrash ? '車禍／事故' : '道路異常';
+        const badgeClass = isCrash ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/15 text-amber-300';
+        return '<article class="pbs-card"><div class="flex items-start justify-between gap-2"><div class="text-sm font-bold text-white">' + roadName + '｜' + pbsEscape(direction) + '</div><span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ' + badgeClass + '">' + eventLabel + '</span></div><div class="mt-2 text-sm font-semibold text-slate-100">' + title + '</div><p class="mt-2 text-xs leading-5 text-slate-300 whitespace-pre-wrap">' + desc + '</p><div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400"><span>發生時間：' + pbsEscape(time) + '</span><span>' + lane + '</span></div></article>';
       }).join('');
     }
 
