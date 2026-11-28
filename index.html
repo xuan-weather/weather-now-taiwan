@@ -161,8 +161,18 @@ opacity: 0;
 套用並關閉
 </button></div></div></div><!-- 系統提示訊息 Toast --><div id="toast-notification" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-opacity duration-300"><div class="bg-slate-900/95 backdrop-blur-md border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded-full shadow-2xl text-xs font-medium flex items-center gap-2"><i class="fa-solid fa-circle-check text-emerald-400"></i><span id="toast-message">已更新至最新路況資料</span></div></div><!-- ==================== JavaScript 核心邏輯：僅顯示官方資料 ==================== --><script>
 const map = L.map('map', {center:[23.7,120.95],zoom:8,zoomControl:false,attributionControl:true});
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-attribution:'&copy; OpenStreetMap &copy; CARTO | 即時資料：交通部 TDX',subdomains:'abcd',maxZoom:19
+// 使用 Esri 公開深色底圖，避免 CARTO API KEY REQUIRED 水印導致整張地圖無法顯示。
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+attribution:'Tiles &copy; Esri, HERE, Garmin, (c) OpenStreetMap contributors | 即時資料：交通部 TDX',
+maxZoom:16,
+maxNativeZoom:16
+}).addTo(map);
+// 深色道路名稱與地名標註圖層。
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+attribution:'Labels &copy; Esri',
+maxZoom:16,
+maxNativeZoom:16,
+pane:'overlayPane'
 }).addTo(map);
 const layers={traffic:L.layerGroup().addTo(map),events:L.layerGroup().addTo(map),cctv:L.layerGroup().addTo(map),cms:L.layerGroup().addTo(map)};
 let activeHighways=new Set(['ALL']);
