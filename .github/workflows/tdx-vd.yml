@@ -2,6 +2,10 @@ name: Update Nationwide TDX VD Live Data
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "scripts/fetch_tdx_traffic.py"
+      - ".github/workflows/tdx-vd.yml"
   schedule:
     # VD 使用獨立頻率，避免拖慢每 5 分鐘的一般道路即時車速更新。
     - cron: "*/15 * * * *"
