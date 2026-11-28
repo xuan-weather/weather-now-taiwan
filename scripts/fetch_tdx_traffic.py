@@ -779,7 +779,8 @@ def main():
         "cityCoverage":{
             "expected":len(LIVE_CITIES),
             "configured":len(CITY_PAIRS),
-            "successful":sum(1 for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES} and item.get("ok") is True),
+            "apiResponded":sum(1 for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES} and item.get("ok") is True),
+            "successful":sum(1 for item in stats if item.get("name") in {city[1] for city in LIVE_CITIES} and item.get("ok") is True and item.get("mappedSegments",0)>0),
             "cities":[
                 {
                     "name":item.get("name"),
