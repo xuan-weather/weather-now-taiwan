@@ -816,7 +816,12 @@ def main():
             # TDX 標準允許即時資料以 SectionID 或 LinkIDs 表示路段。
             # 只有在即時資料無法直接對上線型時，才額外取 SectionLink 對照表。
             link_to_sections={}
-            if any(extract_link_ids(item.get("LinkIDs") or item.get("LinkID")) for item in live) and not direct_ids.issubset(shape_ids):
+            needs_link_mapping=any(
+                extract_link_ids(item.get("LinkIDs") or item.get("LinkID"))
+                and (not section_id(item) or section_id(item) not in shape_ids)
+                for item in live
+            )
+            if needs_link_mapping:
                 link_rows=cached_static_rows(f"Road/Traffic/SectionLink/City/{city_code}", bearer, section_cache)
                 link_to_sections=build_link_to_sections(link_rows)
             level_groups = get_congestion_definitions(f"Road/Traffic/CongestionLevel/City/{city_code}", bearer, level_cache)
