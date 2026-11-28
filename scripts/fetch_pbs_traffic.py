@@ -67,8 +67,8 @@ def parse_kml_mileposts(raw_zip):
     def local_name(element):
         return element.tag.rsplit("}", 1)[-1].lower()
 
-    def first_text(node, wanted):
-        for element in node.iter():
+    def direct_text(node, wanted):
+        for element in list(node):
             if local_name(element) == wanted.lower() and element.text:
                 return element.text.strip()
         return ""
@@ -76,19 +76,22 @@ def parse_kml_mileposts(raw_zip):
     def walk(node, inherited=""):
         tag = local_name(node)
         context = inherited
+        # Folder/Document names must be read from direct children only.
+        # Searching descendants here accidentally picks a child Placemark name
+        # and loses the road/direction context inherited by every milepost.
         if tag in ("folder", "document"):
-            folder_name = first_text(node, "name")
+            folder_name = direct_text(node, "name")
             if folder_name:
                 context = (context + " " + folder_name).strip()
         if tag == "placemark":
-            name = first_text(node, "name")
-            desc = first_text(node, "description")
-            metadata = " ".join(
-                element.text.strip()
-                for element in node.iter()
-                if local_name(element) in ("value", "simpledata") and element.text
-            )
-            parsed = parse_milepost_context(" ".join((context, name, desc, metadata)))
+            name = direct_text(node, "name")
+            desc = direct_text(node, "description")
+            metadata_parts = []
+            for element in node.iter():
+                lname = local_name(element)
+                if lname in ("value", "simpledata") and element.text:
+                    metadata_parts.append(" ".join((element.attrib.get("name", ""), element.text.strip())))
+            parsed = parse_milepost_context(" ".join((context, name, desc, " ".join(metadata_parts))))
             coord_text = ""
             for element in node.iter():
                 if local_name(element) == "coordinates" and element.text:
@@ -109,7 +112,7 @@ def parse_kml_mileposts(raw_zip):
 
     walk(root)
     if not points:
-        raise ValueError("No direction-specific highway milepost coordinates parsed from official KML")
+        raise ValueError("No direction-specific highway milepost coordinates parsed from official KML; check KML folder metadata")
     unique = {}
     for point in points:
         key = (point["road"], point["direction"], round(point["km"], 3))
