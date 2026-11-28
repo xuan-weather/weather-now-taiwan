@@ -1229,7 +1229,7 @@ def fetch_vd_layer(bearer, static_cache):
         },
         "updateIntervalSeconds": 60,
         "liveFetchBudgetSeconds": live_fetch_budget_seconds,
-        "liveUpdatePolicy": "National Highway/Freeway and major metro feeds are prioritized; secondary city feeds are fetched when the 210-second live-fetch budget allows. Skipped sources retain their original observation timestamps and are counted stale when older than the 5-minute freshness window.",
+        "liveUpdatePolicy": "National Highway/Freeway and major metro feeds are prioritized; secondary city feeds are fetched when the 150-second live-fetch budget allows. Skipped sources retain their original observation timestamps and are counted stale when older than the 5-minute freshness window.",
         "totalDevices": len(devices),
         "liveDevices": live_devices,
         "liveSpeedDevices": live_speed_devices,
