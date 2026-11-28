@@ -62,36 +62,40 @@ def parse_kml_mileposts(raw_zip):
     if not kml_name:
         raise ValueError("Official freeway milepost archive contains no KML")
     root = ET.fromstring(archive.read(kml_name))
-    ns = {"k": "http://www.opengis.net/kml/2.2"}
     points = []
 
+    def local_name(element):
+        return element.tag.rsplit("}", 1)[-1].lower()
+
+    def first_text(node, wanted):
+        for element in node.iter():
+            if local_name(element) == wanted.lower() and element.text:
+                return element.text.strip()
+        return ""
+
     def walk(node, inherited=""):
-        tag = node.tag.rsplit("}", 1)[-1]
+        tag = local_name(node)
         context = inherited
-        if tag in ("Folder", "Document"):
-            folder_name = node.find("k:name", ns)
-            if folder_name is not None and folder_name.text:
-                context = (context + " " + folder_name.text).strip()
-        if tag == "Placemark":
-            name = node.findtext("k:name", default="", namespaces=ns)
-            desc = node.findtext("k:description", default="", namespaces=ns)
-            # Include ExtendedData and style metadata: some KML exports keep
-            # road/direction attributes outside the visible name/description.
+        if tag in ("folder", "document"):
+            folder_name = first_text(node, "name")
+            if folder_name:
+                context = (context + " " + folder_name).strip()
+        if tag == "placemark":
+            name = first_text(node, "name")
+            desc = first_text(node, "description")
             metadata = " ".join(
-                (element.text or "")
-                for element in node.findall(".//k:Data/k:value", ns)
+                element.text.strip()
+                for element in node.iter()
+                if local_name(element) in ("value", "simpledata") and element.text
             )
-            metadata += " " + " ".join(
-                (element.text or "")
-                for element in node.findall(".//k:SimpleData", ns)
-            )
-            context_text = " ".join((context, name, desc, metadata))
-            parsed = parse_milepost_context(context_text)
-            coord_node = node.find(".//k:Point/k:coordinates", ns)
-            if coord_node is None:
-                coord_node = node.find(".//k:coordinates", ns)
-            if parsed and coord_node is not None and coord_node.text:
-                values = coord_node.text.strip().split()[0].split(",")
+            parsed = parse_milepost_context(" ".join((context, name, desc, metadata)))
+            coord_text = ""
+            for element in node.iter():
+                if local_name(element) == "coordinates" and element.text:
+                    coord_text = element.text.strip()
+                    break
+            if parsed and coord_text:
+                values = coord_text.split()[0].split(",")
                 if len(values) >= 2:
                     try:
                         lng, lat = float(values[0]), float(values[1])
@@ -106,7 +110,6 @@ def parse_kml_mileposts(raw_zip):
     walk(root)
     if not points:
         raise ValueError("No direction-specific highway milepost coordinates parsed from official KML")
-    # Avoid duplicate placemarks while preserving distinct carriageways.
     unique = {}
     for point in points:
         key = (point["road"], point["direction"], round(point["km"], 3))
